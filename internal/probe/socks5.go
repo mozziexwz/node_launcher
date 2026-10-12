@@ -73,10 +73,10 @@ func socks5Connect(rw io.ReadWriter, p Proxy, host string, port int) error {
 	if greeting[0] != 5 {
 		return errors.New("SOCKS5 协议回复无效")
 	}
+	if method == 0x00 && (greeting[1] == 0x02 || greeting[1] == 0xFF) {
+		return errors.New("本地 SOCKS5 需要认证或不接受无认证连接")
+	}
 	if greeting[1] == 0xFF {
-		if method == 0x00 {
-			return errors.New("本地 SOCKS5 需要认证或不接受无认证连接")
-		}
 		return errors.New("本地 SOCKS5 不接受用户名密码认证")
 	}
 	if greeting[1] != method {

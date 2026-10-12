@@ -30,9 +30,18 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # Node-side v2 probe for the contract test, pinned to mozziexwz/node v2.3.0.
+      - name: Fetch node-side tcp_probe.py
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .cache | Out-Null
+          Invoke-WebRequest -UseBasicParsing -OutFile .cache/tcp_probe.py `
+            https://raw.githubusercontent.com/mozziexwz/node/4ebfc29331e61b4f65870ebe9ce70b733eee8d74/installers/node/tcp_probe.py
+
       - name: Test
         env:
           MSBOOST_CORE_DLL: ${{ github.workspace }}\build\core\ProxyBridgeCore.dll
+          MSBOOST_NODE_PROBE: ${{ github.workspace }}\.cache\tcp_probe.py
         run: go test -count=1 ./...
 
       - name: Build m0spike

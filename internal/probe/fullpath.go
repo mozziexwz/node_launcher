@@ -33,6 +33,17 @@ var failureMessages = map[string]string{
 	"failed":             "节点到游戏 TCP 连接失败",
 }
 
+// Local JSON work is kept outside the timed window: the request is built
+// before the clock starts and the reply is decoded after the arrival time is
+// captured. Tests replace these with slowed-down versions to prove it.
+var (
+	newConnectRequest = func(nonce, gameAddr string, gamePort int) []byte {
+		return []byte(`{"version":2,"operation":"connect","nonce":"` + nonce +
+			`","target_address":"` + gameAddr + `","target_port":` + strconv.Itoa(gamePort) + "}\n")
+	}
+	decodeReply = parseReply
+)
+
 var (
 	errInvalidUTF8 = errors.New("测速回复不是有效 UTF-8")
 
@@ -106,8 +117,7 @@ func FullPathLatency(proxy Proxy, gameAddr string, gamePort int, opts FullPathOp
 			samples = append(samples, Sample{Err: err.Error()})
 			continue
 		}
-		request := []byte(`{"version":2,"operation":"connect","nonce":"` + nonce +
-			`","target_address":"` + gameAddr + `","target_port":` + strconv.Itoa(gamePort) + "}\n")
+		request := newConnectRequest(nonce, gameAddr, gamePort)
 
 		start := time.Now()
 		deadline := start.Add(opts.AttemptTimeout)
@@ -167,7 +177,7 @@ func hello(conn net.Conn, start, deadline time.Time, timeout time.Duration) (str
 	if err != nil {
 		return "", err
 	}
-	fields, err := parseReply(line)
+	fields, err := decodeReply(line)
 	if err != nil {
 		return "", err
 	}
@@ -192,7 +202,7 @@ func (s *fullPathSession) connect(request []byte, start, deadline time.Time, tim
 	if err != nil {
 		return Sample{Err: failureReason(err)}, false
 	}
-	fields, err := parseReply(line)
+	fields, err := decodeReply(line)
 	if err != nil {
 		return Sample{Err: failureReason(err)}, false
 	}
