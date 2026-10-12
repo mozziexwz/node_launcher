@@ -19,11 +19,17 @@
 ## 目录
 
 ```text
-docs/          规划与设计文档；全程测速 v2 合同（MSBOOST全程TCP测速整改计划.md）
+main.go, app.go, tray.go   Wails 界面入口、前端绑定、托盘
+frontend/      界面（React + TypeScript + Vite）
+internal/      engine（嵌入 mieru）、redirector（ProxyBridgeCore.dll）、probe（网络检测）、profiles、winsys
+cmd/m0spike/   M0 验证工具（命令行）
+docs/          规划与设计文档；全程测速 v2 合同；M0 验证指南（docs/m0/）
 legacy/        旧版 BAT 启动器与 PowerShell 测试，仅供移植参考，不参与构建
 scripts/       获取 WinDivert、编译 ProxyBridgeCore.dll 等脚本
 third_party/   ProxyBridge 子模块（固定 v4.1.0），WinDivert 校验值
 ```
+
+构建界面：安装 Wails CLI v2.16.0（`go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0`），然后在仓库根目录执行 `wails build`，产物为 `build/bin/MSBOOST-Launcher.exe`。
 
 ## 开发环境
 

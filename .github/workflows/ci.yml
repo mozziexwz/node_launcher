@@ -38,10 +38,20 @@ jobs:
       - name: Build m0spike
         run: go build -o build/m0/m0spike.exe ./cmd/m0spike
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Build launcher UI (Wails)
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0
+          wails build -clean -m -platform windows/amd64
+
       - uses: actions/upload-artifact@v4
         with:
           name: m0-windows-x64
           path: |
             build/core/
             build/m0/m0spike.exe
+            build/bin/MSBOOST-Launcher.exe
           if-no-files-found: error

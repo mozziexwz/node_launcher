@@ -40,6 +40,17 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## 界面相关组件
+
+| 组件 | 版本 | 许可 | 来源 |
+|---|---|---|---|
+| Wails | v2.16.0 | MIT | <https://github.com/wailsapp/wails> |
+| fyne.io/systray | v1.12.2 | Apache-2.0 | <https://github.com/fyne-io/systray> |
+| React / React DOM | 19.x | MIT | <https://github.com/facebook/react> |
+| Vite | 7.x | MIT | <https://github.com/vitejs/vite> |
+
+`build/windows/icon.ico` 与 `build/appicon.png` 目前是 Wails 模板自带的占位图标，正式发布前替换为 MSBOOST 图标。
+
 ## WinDivert
 
 - 来源：<https://github.com/basil00/WinDivert>

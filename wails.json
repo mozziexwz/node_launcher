@@ -1,0 +1,20 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "MSBOOST-Launcher",
+  "outputfilename": "MSBOOST-Launcher",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "mozziexwz",
+    "email": "mozziexwz@users.noreply.github.com"
+  },
+  "info": {
+    "companyName": "MSBOOST",
+    "productName": "MSBOOST 启动器",
+    "productVersion": "0.0.1",
+    "copyright": "GPL-3.0",
+    "comments": "https://github.com/mozziexwz/node_launcher"
+  }
+}
