@@ -105,7 +105,7 @@ func EntranceLatency(ipv4 string, port, count int, timeout time.Duration) Result
 	for i := 0; i < count; i++ {
 		samples = append(samples, measureTCPConnect(ipv4, port, timeout))
 	}
-	return newResult(samples)
+	return NewResult(samples)
 }
 
 func measureTCPConnect(ipv4 string, port int, timeout time.Duration) Sample {

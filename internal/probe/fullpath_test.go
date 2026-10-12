@@ -404,14 +404,14 @@ func TestReadReplyLineLengthLimit(t *testing.T) {
 }
 
 func TestResultCompactRounding(t *testing.T) {
-	r := newResult([]Sample{{OK: true, Duration: 190500 * time.Microsecond}})
+	r := NewResult([]Sample{{OK: true, Duration: 190500 * time.Microsecond}})
 	if got := r.Compact(); got != "191 ms" {
 		t.Errorf("Compact = %q, want 191 ms (half away from zero)", got)
 	}
-	if got := newResult([]Sample{{OK: true, Duration: 300 * time.Microsecond}}).Compact(); got != "<1 ms" {
+	if got := NewResult([]Sample{{OK: true, Duration: 300 * time.Microsecond}}).Compact(); got != "<1 ms" {
 		t.Errorf("Compact = %q, want <1 ms", got)
 	}
-	mixed := newResult([]Sample{{OK: true, Duration: 10 * time.Millisecond}, {Err: "x"}, {Err: "x"}})
+	mixed := NewResult([]Sample{{OK: true, Duration: 10 * time.Millisecond}, {Err: "x"}, {Err: "x"}})
 	if mixed.SuccessCount != 1 || len(mixed.Errors) != 1 || mixed.Average != 10*time.Millisecond {
 		t.Errorf("failed samples must not be averaged as zero: %+v", mixed)
 	}

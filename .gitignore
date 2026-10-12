@@ -5,6 +5,7 @@
 /build/bin/
 /build/core/
 /build/m0/
+/build/m1/
 /.cache/
 /dist/
 /frontend/node_modules/

@@ -30,7 +30,8 @@ type Result struct {
 	Errors       []string // unique failure reasons in first-seen order
 }
 
-func newResult(samples []Sample) Result {
+// NewResult aggregates samples; failed attempts never count as zero.
+func NewResult(samples []Sample) Result {
 	r := Result{Samples: samples, TotalCount: len(samples)}
 	var sum time.Duration
 	seen := make(map[string]bool)

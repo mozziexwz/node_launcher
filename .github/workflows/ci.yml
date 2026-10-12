@@ -47,6 +47,20 @@ jobs:
       - name: Build m0spike
         run: go build -o build/m0/m0spike.exe ./cmd/m0spike
 
+      # M1 acceptance bundle: the CLI next to our patched core and WinDivert.
+      - name: Build msboostctl bundle
+        shell: pwsh
+        run: |
+          go build -o build/m1/msboostctl.exe ./cmd/msboostctl
+          Copy-Item build/core/* build/m1/
+          Get-ChildItem build/m1 | ForEach-Object { '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash, $_.Name } | Set-Content build/m1/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: m1-windows-x64
+          path: build/m1/
+          if-no-files-found: error
+
       - uses: actions/setup-node@v4
         with:
           node-version: '24'

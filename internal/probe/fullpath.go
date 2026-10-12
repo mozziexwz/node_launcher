@@ -130,7 +130,7 @@ func FullPathLatency(proxy Proxy, gameAddr string, gamePort int, opts FullPathOp
 			session = nil
 		}
 	}
-	return newResult(samples)
+	return NewResult(samples)
 }
 
 type fullPathSession struct {

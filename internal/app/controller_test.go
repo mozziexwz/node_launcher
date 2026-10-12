@@ -1,0 +1,637 @@
+package app
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/mozziexwz/node_launcher/internal/engine"
+	"github.com/mozziexwz/node_launcher/internal/logx"
+	"github.com/mozziexwz/node_launcher/internal/probe"
+	"github.com/mozziexwz/node_launcher/internal/profiles"
+	"github.com/mozziexwz/node_launcher/internal/store"
+)
+
+// ---- fakes ----
+
+type fakeEngine struct {
+	addr     *net.TCPAddr
+	user     string
+	password string
+	mu       sync.Mutex
+	closed   int
+}
+
+func (e *fakeEngine) Addr() *net.TCPAddr           { return e.addr }
+func (e *fakeEngine) Credential() (string, string) { return e.user, e.password }
+func (e *fakeEngine) Stats() engine.Stats          { return engine.Stats{Accepted: 5, Active: 2} }
+func (e *fakeEngine) Close() error                 { e.mu.Lock(); e.closed++; e.mu.Unlock(); return nil }
+func (e *fakeEngine) closeCount() int              { e.mu.Lock(); defer e.mu.Unlock(); return e.closed }
+
+type fakeRedirector struct {
+	mu           sync.Mutex
+	calls        []string
+	nextID       uint32
+	failSOCKS    bool
+	failRuleCall int // 1-based AddProxyRule call that fails; 0 = never
+	ruleCalls    int
+	startFails   bool
+	rules        map[uint32]string
+	proxies      map[uint32]bool
+}
+
+func newFakeRedirector() *fakeRedirector {
+	return &fakeRedirector{rules: make(map[uint32]string), proxies: make(map[uint32]bool)}
+}
+
+func (r *fakeRedirector) record(s string) { r.calls = append(r.calls, s) }
+
+func (r *fakeRedirector) Prepare() { r.mu.Lock(); r.record("prepare"); r.mu.Unlock() }
+
+func (r *fakeRedirector) AddSOCKS5(host string, port uint16, user, password string, sendDomain bool) (uint32, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.record(fmt.Sprintf("add-socks5 %s:%d %s domain=%v", host, port, user, sendDomain))
+	if r.failSOCKS {
+		return 0, errors.New("socks5 rejected")
+	}
+	r.nextID++
+	r.proxies[r.nextID] = true
+	return r.nextID, nil
+}
+
+func (r *fakeRedirector) DeleteProxy(id uint32) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.record(fmt.Sprintf("delete-proxy %d", id))
+	ok := r.proxies[id]
+	delete(r.proxies, id)
+	return ok
+}
+
+func (r *fakeRedirector) AddProxyRule(processes string, proxyID uint32) (uint32, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ruleCalls++
+	r.record("add-rule " + processes)
+	if r.ruleCalls == r.failRuleCall {
+		return 0, errors.New("rule rejected")
+	}
+	r.nextID++
+	r.rules[r.nextID] = processes
+	return r.nextID, nil
+}
+
+func (r *fakeRedirector) DeleteRule(id uint32) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.record(fmt.Sprintf("delete-rule %d", id))
+	_, ok := r.rules[id]
+	delete(r.rules, id)
+	return ok
+}
+
+func (r *fakeRedirector) Start() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.record("start")
+	return !r.startFails
+}
+
+func (r *fakeRedirector) Stop() bool { r.mu.Lock(); r.record("stop"); r.mu.Unlock(); return true }
+
+func (r *fakeRedirector) snapshot() ([]string, int, int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.calls...), len(r.rules), len(r.proxies)
+}
+
+type fakeSystem struct {
+	elevated    bool
+	conflicts   []Conflict
+	running     []string
+	driverStops int
+	cleanups    int
+}
+
+func (s *fakeSystem) Elevated() bool                     { return s.elevated }
+func (s *fakeSystem) Conflicts() []Conflict              { return s.conflicts }
+func (s *fakeSystem) RunningProcesses([]string) []string { return s.running }
+func (s *fakeSystem) StopDriver() (string, error)        { s.driverStops++; return "STOPPED", nil }
+func (s *fakeSystem) Cleanup(string) []string            { s.cleanups++; return []string{"done"} }
+
+type harness struct {
+	c        *Controller
+	layout   store.Layout
+	red      *fakeRedirector
+	sys      *fakeSystem
+	log      *logx.Logger
+	engines  []*fakeEngine
+	loads    int
+	engErr   error
+	checkLog []string
+	mu       sync.Mutex
+}
+
+func exampleConfig(t *testing.T) map[string]any {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("..", "..", "testdata", "client-example.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+func writeConfig(t *testing.T, layout store.Layout, name string, m map[string]any) {
+	t.Helper()
+	b, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(layout.Configs, name), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func newHarness(t *testing.T, mutate func(*harness)) *harness {
+	t.Helper()
+	h := &harness{red: newFakeRedirector(), sys: &fakeSystem{elevated: true}}
+	h.layout = store.NewLayout(t.TempDir())
+	if err := h.layout.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	writeConfig(t, h.layout, "直连.json", exampleConfig(t))
+	settings := store.DefaultSettings()
+	settings.CurrentConfig = "直连.json"
+	if err := h.layout.SaveSettings(settings); err != nil {
+		t.Fatal(err)
+	}
+	h.log, _ = logx.New("", 0)
+	if mutate != nil {
+		mutate(h)
+	}
+	h.c = New(Deps{
+		Layout: h.layout,
+		Log:    h.log,
+		StartEngine: func(*engine.Config) (CoreEngine, error) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			if h.engErr != nil {
+				return nil, h.engErr
+			}
+			e := &fakeEngine{
+				addr: &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 40000 + len(h.engines)},
+				user: fmt.Sprintf("session-user-%d", len(h.engines)), password: fmt.Sprintf("session-pass-%d", len(h.engines)),
+			}
+			h.engines = append(h.engines, e)
+			return e, nil
+		},
+		LoadRedirector: func() (Redirector, error) { h.loads++; return h.red, nil },
+		System:         h.sys,
+		Checks:         h.fakeChecks(),
+	})
+	return h
+}
+
+func (h *harness) allEnginesClosed(t *testing.T) {
+	t.Helper()
+	for i, e := range h.engines {
+		if e.closeCount() != 1 {
+			t.Fatalf("engine %d closed %d times, want exactly once", i, e.closeCount())
+		}
+	}
+}
+
+// ---- start / stop ----
+
+func TestStartStopHappyPath(t *testing.T) {
+	h := newHarness(t, nil)
+	var states []State
+	cancel := h.c.Watch(func(s Status) { states = append(states, s.State) })
+	defer cancel()
+
+	warnings, err := h.c.Start()
+	if err != nil || len(warnings) != 0 {
+		t.Fatalf("Start: warnings=%v err=%v", warnings, err)
+	}
+	st := h.c.Status()
+	if st.State != StateRunning || st.Config != "直连.json" || st.Accepted != 5 || st.Active != 2 || st.Since.IsZero() {
+		t.Fatalf("status %+v", st)
+	}
+	calls, _, _ := h.red.snapshot()
+	game := profiles.DefaultMapleStory().ProcessList()
+	want := []string{"prepare", "add-socks5 127.0.0.1:40000 session-user-0 domain=true", "add-rule " + game, "start"}
+	if strings.Join(calls, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("calls:\n%s\nwant:\n%s", strings.Join(calls, "\n"), strings.Join(want, "\n"))
+	}
+
+	if err := h.c.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	calls, rules, proxies := h.red.snapshot()
+	tail := calls[len(want):]
+	if strings.Join(tail, ",") != "stop,delete-rule 2,delete-proxy 1" || rules != 0 || proxies != 0 {
+		t.Fatalf("stop sequence %v rules=%d proxies=%d", tail, rules, proxies)
+	}
+	if h.sys.driverStops != 1 || h.c.Status().State != StateIdle {
+		t.Fatalf("driver stops %d state %s", h.sys.driverStops, h.c.Status().State)
+	}
+	h.allEnginesClosed(t)
+	if got := fmt.Sprint(states); got != "[starting running stopping idle]" {
+		t.Fatalf("observed states %s", got)
+	}
+	if h.loads != 1 {
+		t.Fatalf("redirector loaded %d times", h.loads)
+	}
+}
+
+func TestStartWithAddonsAndWarnings(t *testing.T) {
+	h := newHarness(t, func(h *harness) {
+		s, _ := h.layout.LoadSettings()
+		s.Addons["discord"] = true
+		h.layout.SaveSettings(s)
+		h.sys.conflicts = []Conflict{{Message: "检测到 Netch 正在运行", Blocking: false}}
+		h.sys.running = []string{"MapleStory.exe"}
+	})
+	warnings, err := h.c.Start()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warnings) != 2 || !strings.Contains(warnings[0], "Netch") || !strings.Contains(warnings[1], "MapleStory.exe") {
+		t.Fatalf("warnings %v", warnings)
+	}
+	calls, rules, _ := h.red.snapshot()
+	discord, _ := findAddon("discord")
+	if rules != 2 || calls[3] != "add-rule "+discord.ProcessList() {
+		t.Fatalf("calls %v", calls)
+	}
+	h.c.Stop()
+}
+
+func TestStartRollsBackEveryStep(t *testing.T) {
+	cases := []struct {
+		name         string
+		setup        func(*harness)
+		wantErr      string
+		wantEngines  int
+		wantRedLoads int
+	}{
+		{"not elevated", func(h *harness) { h.sys.elevated = false }, "管理员", 0, 0},
+		{"blocking conflict", func(h *harness) {
+			h.sys.conflicts = []Conflict{{Message: "检测到 ProxyBridge 正在运行，请先退出它", Blocking: true}}
+		}, "ProxyBridge", 0, 0},
+		{"no config selected", func(h *harness) {
+			s, _ := h.layout.LoadSettings()
+			s.CurrentConfig = ""
+			h.layout.SaveSettings(s)
+		}, "请先选择节点配置", 0, 0},
+		{"broken config", func(h *harness) {
+			os.WriteFile(filepath.Join(h.layout.Configs, "直连.json"), []byte("{"), 0o644)
+		}, "节点配置", 0, 0},
+		{"core fails", func(h *harness) { h.engErr = errors.New("MSBOOST 核心启动失败：boom") }, "核心启动失败", 0, 0},
+		{"proxy config rejected", func(h *harness) { h.red.failSOCKS = true }, "socks5 rejected", 1, 1},
+		{"game rule rejected", func(h *harness) { h.red.failRuleCall = 1 }, "rule rejected", 1, 1},
+		{"addon rule rejected", func(h *harness) {
+			s, _ := h.layout.LoadSettings()
+			s.Addons["steam"] = true
+			h.layout.SaveSettings(s)
+			h.red.failRuleCall = 2
+		}, "rule rejected", 1, 1},
+		{"interception fails", func(h *harness) { h.red.startFails = true }, "分流启动失败", 1, 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t, c.setup)
+			_, err := h.c.Start()
+			if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+				t.Fatalf("err = %v, want it to mention %q", err, c.wantErr)
+			}
+			st := h.c.Status()
+			if st.State != StateIdle || st.LastError == "" {
+				t.Fatalf("status after failure %+v", st)
+			}
+			if len(h.engines) != c.wantEngines || h.loads != c.wantRedLoads {
+				t.Fatalf("engines=%d loads=%d", len(h.engines), h.loads)
+			}
+			h.allEnginesClosed(t)
+			calls, rules, proxies := h.red.snapshot()
+			if rules != 0 || proxies != 0 {
+				t.Fatalf("leftover rules=%d proxies=%d after rollback; calls %v", rules, proxies, calls)
+			}
+			for _, call := range calls {
+				if call == "stop" {
+					t.Fatal("a failed start must not call Stop on interception that never started")
+				}
+			}
+			// The session secrets are no longer masked once the start failed.
+			h.log.Printf(logx.App, "probe session-pass-0")
+			if lines := h.log.Recent(1); len(lines) == 1 && !strings.Contains(lines[0].Text, "session-pass-0") {
+				t.Fatal("secrets of a failed start must be released")
+			}
+		})
+	}
+}
+
+func TestSecretsMaskedOnlyDuringSession(t *testing.T) {
+	h := newHarness(t, nil)
+	if _, err := h.c.Start(); err != nil {
+		t.Fatal(err)
+	}
+	h.log.Printf(logx.Core, "auth session-pass-0 node test-password")
+	if text := h.log.Recent(1)[0].Text; strings.Contains(text, "session-pass-0") || strings.Contains(text, "test-password") {
+		t.Fatalf("secrets leaked into the log: %q", text)
+	}
+	h.c.Stop()
+	h.log.Printf(logx.Core, "after session-pass-0")
+	if text := h.log.Recent(1)[0].Text; !strings.Contains(text, "session-pass-0") {
+		t.Fatalf("old session secrets should be released after stop: %q", text)
+	}
+}
+
+func TestAddonSwitchesLive(t *testing.T) {
+	h := newHarness(t, nil)
+	if _, err := h.c.Start(); err != nil {
+		t.Fatal(err)
+	}
+	discord, _ := findAddon("discord")
+	if err := h.c.SetAddon("discord", true); err != nil {
+		t.Fatal(err)
+	}
+	calls, rules, _ := h.red.snapshot()
+	if calls[len(calls)-1] != "add-rule "+discord.ProcessList() || rules != 2 {
+		t.Fatalf("calls %v", calls)
+	}
+	if err := h.c.SetAddon("discord", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, rules, _ := h.red.snapshot(); rules != 2 {
+		t.Fatal("switching on twice must not add a second rule")
+	}
+	if s, _ := h.layout.LoadSettings(); !s.Addons["discord"] {
+		t.Fatal("the switch must be saved")
+	}
+	if err := h.c.SetAddon("discord", false); err != nil {
+		t.Fatal(err)
+	}
+	calls, rules, _ = h.red.snapshot()
+	if !strings.HasPrefix(calls[len(calls)-1], "delete-rule ") || rules != 1 {
+		t.Fatalf("calls %v rules %d", calls, rules)
+	}
+	if err := h.c.SetAddon("vpn", true); err == nil {
+		t.Fatal("unknown addon accepted")
+	}
+	h.c.Stop()
+	if _, rules, proxies := h.red.snapshot(); rules != 0 || proxies != 0 {
+		t.Fatal("stop must remove addon rules too")
+	}
+	// While idle the switch is only saved.
+	if err := h.c.SetAddon("steam", true); err != nil {
+		t.Fatal(err)
+	}
+	if calls, _, _ := h.red.snapshot(); strings.Contains(calls[len(calls)-1], "steam") {
+		t.Fatal("an idle switch must not touch the redirector")
+	}
+}
+
+func TestStateGuards(t *testing.T) {
+	h := newHarness(t, nil)
+	if err := h.c.Stop(); !errors.Is(err, ErrNotRunning) {
+		t.Fatalf("stop while idle: %v", err)
+	}
+	if _, err := h.c.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.c.Start(); !errors.Is(err, ErrRunning) {
+		t.Fatalf("second start: %v", err)
+	}
+	writeConfig(t, h.layout, "日本中转.json", exampleConfig(t))
+	if err := h.c.SelectConfig("日本中转.json"); !errors.Is(err, ErrRunning) {
+		t.Fatalf("select while running: %v", err)
+	}
+	if _, err := h.c.Cleanup("x.exe"); !errors.Is(err, ErrRunning) {
+		t.Fatalf("cleanup while running: %v", err)
+	}
+	h.c.Shutdown()
+	if h.c.Status().State != StateIdle {
+		t.Fatal("Shutdown must stop acceleration")
+	}
+	if err := h.c.SelectConfig("日本中转.json"); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := h.layout.LoadSettings(); s.CurrentConfig != "日本中转.json" {
+		t.Fatal("selection must be saved")
+	}
+	if err := h.c.SelectConfig("missing.json"); err == nil {
+		t.Fatal("a missing config must not be selectable")
+	}
+	if _, err := h.c.Cleanup("x.exe"); err != nil || h.sys.cleanups != 1 {
+		t.Fatalf("cleanup: %v (%d)", err, h.sys.cleanups)
+	}
+}
+
+// ---- network check: port of Test-FullPathLatency.ps1 groups 17-20 ----
+
+func samples(n int, d time.Duration) probe.Result {
+	s := make([]probe.Sample, n)
+	for i := range s {
+		s[i] = probe.Sample{OK: true, Duration: d}
+	}
+	return probe.NewResult(s)
+}
+
+type checkMode struct {
+	ipFails       bool
+	dnsReason     string
+	entranceFails bool
+	missingV2     bool
+}
+
+var currentCheckMode checkMode
+
+func (h *harness) fakeChecks() CheckFuncs {
+	note := func(s string) {
+		h.mu.Lock()
+		h.checkLog = append(h.checkLog, s)
+		h.mu.Unlock()
+	}
+	return CheckFuncs{
+		ExitIP: func(_ context.Context, p probe.Proxy) (string, error) {
+			note("ip " + p.Addr + " " + p.User)
+			if currentCheckMode.ipFails {
+				return "", errors.New("mock IP lookup failure")
+			}
+			return "198.51.100.9", nil
+		},
+		ResolveEntrance: func(address string, _ time.Duration) (string, string) {
+			note("resolve " + address)
+			if currentCheckMode.dnsReason != "" {
+				return "", currentCheckMode.dnsReason
+			}
+			return address, ""
+		},
+		Entrance: func(ip string, port, count int, _ time.Duration) probe.Result {
+			note(fmt.Sprintf("entrance %s:%d x%d", ip, port, count))
+			if currentCheckMode.entranceFails {
+				return probe.Unavailable("目标拒绝连接")
+			}
+			return samples(3, 165*time.Millisecond)
+		},
+		FullPath: func(p probe.Proxy, addr string, port int, _ probe.FullPathOptions) probe.Result {
+			note(fmt.Sprintf("full %s:%d via %s as %s", addr, port, p.Addr, p.User))
+			if currentCheckMode.missingV2 {
+				return probe.Unavailable("节点未提供兼容的版本 2 全程 TCP 测速服务或服务不可达")
+			}
+			return samples(3, 221250*time.Microsecond)
+		},
+	}
+}
+
+func (h *harness) calls() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return strings.Join(h.checkLog, " | ")
+}
+
+func runCheck(t *testing.T, mode checkMode, setup func(*harness)) (*harness, CheckResult) {
+	t.Helper()
+	currentCheckMode = mode
+	t.Cleanup(func() { currentCheckMode = checkMode{} })
+	h := newHarness(t, setup)
+	r, err := h.c.Check(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h, r
+}
+
+func TestCheckShowsMeasuredFullPathWithoutAddingEntrance(t *testing.T) {
+	h, r := runCheck(t, checkMode{}, nil)
+	if r.ExitIP != "198.51.100.9" || r.Entrance.Compact() != "165 ms" || r.EntranceTarget != "192.0.2.10:8964" {
+		t.Fatalf("result %+v", r)
+	}
+	if got := r.Game.Compact(); got != "221 ms" {
+		t.Fatalf("game latency %q: must be the measured full path, never 165 + 221", got)
+	}
+	want := "ip 127.0.0.1:40000 session-user-0 | resolve 192.0.2.10 | entrance 192.0.2.10:8964 x3 | full 35.155.204.207:8585 via 127.0.0.1:40000 as session-user-0"
+	if got := h.calls(); got != want {
+		t.Fatalf("calls:\n%s\nwant:\n%s", got, want)
+	}
+	h.allEnginesClosed(t) // the temporary core started for an idle check is closed
+}
+
+func TestCheckUsesConfiguredProbeTarget(t *testing.T) {
+	h, r := runCheck(t, checkMode{}, func(h *harness) {
+		s, _ := h.layout.LoadSettings()
+		s.ProbeTarget = store.ProbeTarget{Address: "51.222.56.192", Port: 8484}
+		h.layout.SaveSettings(s)
+	})
+	if r.GameTarget != "51.222.56.192:8484" || !strings.Contains(h.calls(), "full 51.222.56.192:8484") {
+		t.Fatalf("target %s calls %s", r.GameTarget, h.calls())
+	}
+}
+
+func TestCheckEntranceProblemsNeverSuppressGame(t *testing.T) {
+	udpOnly := func(h *harness) {
+		m := exampleConfig(t)
+		server := m["profiles"].([]any)[0].(map[string]any)["servers"].([]any)[0].(map[string]any)
+		server["portBindings"].([]any)[0].(map[string]any)["protocol"] = "UDP"
+		writeConfig(t, h.layout, "直连.json", m)
+	}
+	twoServers := func(h *harness) {
+		m := exampleConfig(t)
+		profile := m["profiles"].([]any)[0].(map[string]any)
+		profile["servers"] = append(profile["servers"].([]any), map[string]any{
+			"ipAddress": "192.0.2.20", "portBindings": []any{map[string]any{"port": 9000, "protocol": "TCP"}},
+		})
+		writeConfig(t, h.layout, "直连.json", m)
+	}
+	domain := func(h *harness) {
+		m := exampleConfig(t)
+		server := m["profiles"].([]any)[0].(map[string]any)["servers"].([]any)[0].(map[string]any)
+		delete(server, "ipAddress")
+		server["domainName"] = "relay.example.invalid"
+		writeConfig(t, h.layout, "直连.json", m)
+	}
+	cases := []struct {
+		name          string
+		mode          checkMode
+		setup         func(*harness)
+		entranceRuns  bool
+		entranceShows string
+	}{
+		{"entrance TCP failure", checkMode{entranceFails: true}, nil, true, "目标拒绝连接"},
+		{"entrance DNS failure", checkMode{dnsReason: "中转域名解析超时"}, domain, false, "中转域名解析超时"},
+		{"UDP-only entrance", checkMode{}, udpOnly, false, "无 TCP 测试端口"},
+		{"several servers", checkMode{}, twoServers, false, "无法唯一确定测试目标"},
+		{"exit IP failure", checkMode{ipFails: true}, nil, true, "165 ms"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h, r := runCheck(t, c.mode, c.setup)
+			if got := r.Game.Compact(); got != "221 ms" {
+				t.Fatalf("game %q must survive entrance/IP problems", got)
+			}
+			if strings.Contains(h.calls(), "entrance ") != c.entranceRuns {
+				t.Fatalf("entrance measurement ran=%v; calls %s", !c.entranceRuns, h.calls())
+			}
+			if !strings.Contains(r.Entrance.Compact(), c.entranceShows) {
+				t.Fatalf("entrance %q lacks %q", r.Entrance.Compact(), c.entranceShows)
+			}
+			if c.mode.ipFails && !strings.Contains(r.ExitIPError, "mock IP lookup failure") {
+				t.Fatalf("IP failure must stay visible: %+v", r)
+			}
+		})
+	}
+}
+
+func TestCheckMissingV2ServiceIsExplicit(t *testing.T) {
+	_, r := runCheck(t, checkMode{missingV2: true}, nil)
+	game := r.Game.Compact()
+	if !strings.Contains(game, "版本 2") || strings.Contains(game, "ms") {
+		t.Fatalf("game %q must name the v2 requirement without inventing a latency", game)
+	}
+	if r.Entrance.Compact() != "165 ms" || r.ExitIP != "198.51.100.9" {
+		t.Fatal("the other two checks stay available")
+	}
+}
+
+// The legacy launcher refused the full-path check when the config asked for
+// local SOCKS5 authentication. The launcher now always authenticates with its
+// own session credentials, so such configs are checked like any other.
+func TestCheckIgnoresConfiguredLocalAuthentication(t *testing.T) {
+	h, r := runCheck(t, checkMode{}, func(h *harness) {
+		m := exampleConfig(t)
+		m["socks5Authentication"] = []any{map[string]any{"user": "test-only", "password": "test-only"}}
+		writeConfig(t, h.layout, "直连.json", m)
+	})
+	if r.Game.Compact() != "221 ms" || !strings.Contains(h.calls(), "as session-user-0") {
+		t.Fatalf("game %q calls %s", r.Game.Compact(), h.calls())
+	}
+}
+
+func TestCheckWhileRunningReusesTheSessionCore(t *testing.T) {
+	h := newHarness(t, nil)
+	if _, err := h.c.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.c.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.engines) != 1 || h.engines[0].closeCount() != 0 {
+		t.Fatalf("engines=%d; the running core must be reused and stay open", len(h.engines))
+	}
+	h.c.Stop()
+	h.allEnginesClosed(t)
+}
