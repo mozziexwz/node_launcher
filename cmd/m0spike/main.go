@@ -39,20 +39,26 @@ func usage() {
 
 用法：
   m0spike svc                                   查看权限、服务、端口与防火墙规则名（无需管理员）
-  m0spike probe  -config 直连.json [-game IP:端口]  只启动 mieru，执行三项网络检测（无需管理员）
-  m0spike engine -config 直连.json               只启动 mieru 本地 SOCKS5，打印地址与凭据，Ctrl+C 退出
-  m0spike run    -config 直连.json [选项]         完整加速：mieru + ProxyBridge 按进程分流（需要管理员）
+  m0spike probe  -config 直连.json [-game IP:端口]  只启动 MSBOOST 核心，执行三项网络检测（无需管理员）
+  m0spike engine -config 直连.json               只启动 MSBOOST 本地 SOCKS5，打印地址与凭据，Ctrl+C 退出
+  m0spike run    -config 直连.json [选项]         完整加速：MSBOOST 核心 + 按进程分流（需要管理员）
 
 run 的选项：
   -core 路径        ProxyBridgeCore.dll（默认本机已装的官方 ProxyBridge）
   -profile 文件     改用 ProxyBridge 导出的 .pbprofile 中启用的 PROXY 规则
   -duration 时长    运行指定时长后自动停止，如 30m、1h（默认等待 Ctrl+C）
   -conns            打印每条连接的分流结果（诊断用）
+  -discord          同时加速 Discord（可选项，默认关闭）
+  -steam            同时加速 Steam（可选项，默认关闭）
   -keep-driver      停止后不卸载 WinDivert 驱动
 `)
 }
 
 func main() {
+	// Core library log lines carry their own text; tag them so the console
+	// and log file show which component spoke.
+	mlog.SetOutput(coreLogWriter{})
+	mlog.SetLevel("INFO")
 	if len(os.Args) < 2 {
 		usage()
 		os.Exit(2)
@@ -111,9 +117,18 @@ func openLog(command string) {
 	logFile = f
 	logOut = io.MultiWriter(os.Stdout, f)
 	logMu.Unlock()
-	mlog.SetOutput(lockedWriter{})
-	mlog.SetLevel("INFO")
 	logf("日志文件：%s", f.Name())
+}
+
+// coreLogWriter prefixes each core log entry with a timestamp and [核心].
+type coreLogWriter struct{}
+
+func (coreLogWriter) Write(p []byte) (int, error) {
+	text := strings.TrimRight(string(p), "\r\n")
+	if text != "" {
+		logf("[核心] %s", text)
+	}
+	return len(p), nil
 }
 
 func closeLog() {
@@ -179,7 +194,7 @@ func cmdSvc() error {
 
 func loadConfig(path string) (*engine.Config, error) {
 	if path == "" {
-		return nil, errors.New("请用 -config 指定 mieru 客户端 JSON 配置")
+		return nil, errors.New("请用 -config 指定 MSBOOST 节点配置（.json 文件）")
 	}
 	cfg, err := engine.LoadConfigFile(path)
 	if err != nil {
@@ -195,7 +210,7 @@ func startEngine(cfg *engine.Config) (*engine.Engine, probe.Proxy, error) {
 		return nil, probe.Proxy{}, err
 	}
 	user, password := e.Credential()
-	logf("mieru 本地 SOCKS5：%s（会话凭据已生成）", e.Addr())
+	logf("MSBOOST 本地 SOCKS5：%s（会话凭据已生成）", e.Addr())
 	return e, probe.Proxy{Addr: e.Addr().String(), User: user, Password: password}, nil
 }
 
@@ -209,7 +224,7 @@ func waitSignal() <-chan os.Signal {
 
 func cmdProbe(args []string) error {
 	fs := flag.NewFlagSet("probe", flag.ExitOnError)
-	configPath := fs.String("config", "", "mieru 客户端 JSON 配置")
+	configPath := fs.String("config", "", "MSBOOST 节点配置（.json 文件）")
 	defaults := profiles.DefaultMapleStory()
 	game := fs.String("game", net.JoinHostPort(defaults.TestAddress, strconv.Itoa(defaults.TestPort)), "全程测速目标 IP:端口")
 	fs.Parse(args)
@@ -262,7 +277,7 @@ func runChecks(cfg *engine.Config, proxy probe.Proxy, gameAddr string, gamePort 
 
 func cmdEngine(args []string) error {
 	fs := flag.NewFlagSet("engine", flag.ExitOnError)
-	configPath := fs.String("config", "", "mieru 客户端 JSON 配置")
+	configPath := fs.String("config", "", "MSBOOST 节点配置（.json 文件）")
 	fs.Parse(args)
 	cfg, err := loadConfig(*configPath)
 	if err != nil {
@@ -308,8 +323,8 @@ type pbProfile struct {
 	}
 	ProxyRules []struct {
 		Name, ProcessName, TargetHosts, TargetPorts, TargetDomains, Protocol, Action string
-		IsEnabled                                                                   bool
-		ProxyConfigID                                                               uint32 `json:"ProxyConfigId"`
+		IsEnabled                                                                    bool
+		ProxyConfigID                                                                uint32 `json:"ProxyConfigId"`
 	}
 }
 
@@ -351,11 +366,13 @@ func rulesFromPBProfile(path string) ([]rule, bool, error) {
 
 func cmdRun(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
-	configPath := fs.String("config", "", "mieru 客户端 JSON 配置")
+	configPath := fs.String("config", "", "MSBOOST 节点配置（.json 文件）")
 	corePath := fs.String("core", defaultCore, "ProxyBridgeCore.dll 路径")
 	profilePath := fs.String("profile", "", "ProxyBridge 导出的 .pbprofile（可选）")
 	duration := fs.Duration("duration", 0, "运行时长，0 表示等待 Ctrl+C")
 	conns := fs.Bool("conns", false, "打印连接分流结果")
+	discord := fs.Bool("discord", false, "同时加速 Discord")
+	steam := fs.Bool("steam", false, "同时加速 Steam")
 	keepDriver := fs.Bool("keep-driver", false, "停止后不卸载 WinDivert 驱动")
 	fs.Parse(args)
 	openLog("run")
@@ -364,8 +381,11 @@ func cmdRun(args []string) error {
 	if !redirector.IsElevated() {
 		return errors.New("需要管理员权限：请用“以管理员身份运行”打开命令行后再执行")
 	}
+	if _, err := os.Stat(*corePath); err != nil {
+		return fmt.Errorf("找不到核心 DLL：%s。-core 需要填写 ProxyBridgeCore.dll 的实际路径", *corePath)
+	}
 
-	// Rules: the tested default list, or an exported .pbprofile.
+	// Rules: the tested default list (plus opted-in add-ons), or an exported .pbprofile.
 	game := profiles.DefaultMapleStory()
 	rules := []rule{{processes: game.ProcessList(), hosts: "*", ports: "*", domains: "*", protocol: redirector.ProtocolBoth}}
 	sendDomain := game.SendDomainToProxy
@@ -377,6 +397,12 @@ func cmdRun(args []string) error {
 		logf("规则来源：%s", *profilePath)
 	} else {
 		logf("规则来源：内置默认清单（%d 个进程，TCP+UDP）", len(game.Processes))
+	}
+	for _, addon := range profiles.Addons() {
+		if (addon.ID == "discord" && *discord) || (addon.ID == "steam" && *steam) {
+			rules = append(rules, rule{processes: addon.ProcessList(), hosts: "*", ports: "*", domains: "*", protocol: redirector.ProtocolBoth})
+			logf("可选加速：%s（%s）", addon.Name, addon.ProcessList())
+		}
 	}
 
 	logf("== 预检 ==")
@@ -392,7 +418,7 @@ func cmdRun(args []string) error {
 		logf("[注意] 这些进程已在运行：%s。已建立的连接不会被加速，请在加速开始后重启游戏。", strings.Join(running, "、"))
 	}
 
-	logf("== 启动 mieru ==")
+	logf("== 启动 MSBOOST 核心 ==")
 	cfg, err := loadConfig(*configPath)
 	if err != nil {
 		return err
@@ -436,7 +462,7 @@ func cmdRun(args []string) error {
 	if !core.Start() {
 		drainLogs(500 * time.Millisecond)
 		cleanupCore()
-		return errors.New("ProxyBridge 启动失败，原因见上方 [ProxyBridge] 日志")
+		return errors.New("分流启动失败，原因见上方 [分流] 日志")
 	}
 	started := time.Now()
 	exe, _ := os.Executable()
@@ -458,7 +484,7 @@ loop:
 	for {
 		select {
 		case line := <-redirector.Logs():
-			logf("[ProxyBridge] %s", line)
+			logf("[分流] %s", line)
 		case ev := <-redirector.Connections():
 			logf("[连接] %s(%d) → %s:%d %s", ev.Process, ev.PID, ev.DestIP, ev.Port, ev.Info)
 		case <-ticker.C:
@@ -517,7 +543,7 @@ func drainLogs(wait time.Duration) {
 	for {
 		select {
 		case line := <-redirector.Logs():
-			logf("[ProxyBridge] %s", line)
+			logf("[分流] %s", line)
 		case <-deadline:
 			return
 		}

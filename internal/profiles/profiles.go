@@ -57,6 +57,41 @@ func (g Game) ProcessList() string {
 	return strings.Join(g.Processes, ";")
 }
 
+// Addon is an optional app accelerated alongside the game. Like the game's,
+// its process list is fixed: users can only switch an addon on or off.
+type Addon struct {
+	ID        string
+	Name      string
+	Processes []string
+	Protocol  Protocol
+	Note      string // shown next to the switch
+}
+
+// ProcessList joins the processes into ProxyBridge's semicolon-separated form.
+func (a Addon) ProcessList() string {
+	return strings.Join(a.Processes, ";")
+}
+
+// Addons lists the optional accelerations. All are off by default.
+func Addons() []Addon {
+	return []Addon{
+		{
+			ID:        "discord",
+			Name:      "Discord",
+			Processes: []string{"Discord.exe", "DiscordPTB.exe", "DiscordCanary.exe"},
+			Protocol:  ProtocolBoth,
+			Note:      "语音使用 UDP，一并加速",
+		},
+		{
+			ID:        "steam",
+			Name:      "Steam",
+			Processes: []string{"steam.exe", "steamwebhelper.exe"},
+			Protocol:  ProtocolBoth,
+			Note:      "Steam 下载也会经过节点，会消耗节点流量",
+		},
+	}
+}
+
 // Validate checks the profile before it is handed to the redirector.
 func (g Game) Validate() error {
 	if len(g.Processes) == 0 {

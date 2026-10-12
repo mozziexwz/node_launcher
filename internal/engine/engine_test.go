@@ -74,6 +74,48 @@ func socksAuth(t *testing.T, addr, user, password string) (methodOK bool, authOK
 	return true, reply[1] == 0
 }
 
+// negotiate sends a SOCKS5 greeting offering methods and returns the method
+// the server chose, or 0xFF when it refused or closed the connection.
+func negotiate(t *testing.T, addr string, methods ...byte) byte {
+	t.Helper()
+	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+	if _, err := conn.Write(append([]byte{5, byte(len(methods))}, methods...)); err != nil {
+		t.Fatal(err)
+	}
+	reply := make([]byte, 2)
+	if _, err := io.ReadFull(conn, reply); err != nil {
+		return 0xFF
+	}
+	return reply[1]
+}
+
+// TestEngineNeverFallsBackToNoAuth guards the fix shipped in mieru 3.38.1:
+// before it, a client offering both "no auth" and "username/password" was
+// let in without credentials, so any local program could use the node.
+func TestEngineNeverFallsBackToNoAuth(t *testing.T) {
+	cfg, err := ParseConfig(loadExample(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, err := Start(cfg, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	addr := e.Addr().String()
+	if got := negotiate(t, addr, 0x00, 0x02); got != 0x02 {
+		t.Fatalf("offering no-auth and user/pass: server chose method %#x, want 0x02", got)
+	}
+	if got := negotiate(t, addr, 0x00); got == 0x00 {
+		t.Fatal("offering only no-auth must be refused when session credentials are set")
+	}
+}
+
 func TestEngineServesLoopbackSOCKS5WithSessionCredentials(t *testing.T) {
 	cfg, err := ParseConfig(loadExample(t))
 	if err != nil {

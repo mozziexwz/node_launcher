@@ -2,98 +2,83 @@
 
 对应规划 §6 的 M0。验证工具是 `cmd/m0spike`（命令行），M1 之后由正式程序取代。
 
-## 1. 已在开发机上完成的验证
+## 1. 结果（2026-10-13）
 
-| 规划项 | 内容 | 结果 |
+| 规划项 | 结果 | 依据 |
 |---|---|---|
-| 第 1 项 | 下载 WinDivert 2.2.2-A 并核对 SHA-256 | ✅ 与固定值一致；你本机 ProxyBridge 自带的 `WinDivert.dll`、`WinDivert64.sys` 与官方包逐字节相同 |
-| 第 1 项 | 用 MSVC 编译 `ProxyBridgeCore.dll` | 本机没有 MSVC，改由 CI（GitHub Actions）编译。本地行为测试暂用你本机官方 4.1.0 的 DLL（作者签名有效），源码版本与子模块相同 |
-| 第 2 项（接口部分） | Go 不用 cgo，直接调用 DLL | ✅ `AddProxyConfig`、`AddRule`、`DeleteRule`、`DeleteProxyConfig` 的参数与返回值正确，日志回调完整回传（`TestCoreABI`）。原生线程上的回调压力待测试 B 验证 |
-| 第 3 项（本地部分） | 嵌入 mieru 3.38.0，本地 SOCKS5 只监听回环、端口随机、每次生成新凭据 | ✅ 错误密码会被拒绝，关闭后端口不再可连（`TestEngineServesLoopbackSOCKS5WithSessionCredentials`） |
-| — | 全程测速 v2 客户端移植 | ✅ 首批测试通过：暖机不计时、有效失败沿用原会话、协议错误/超时后重连、旧节点不重试、多余数据、认证失败、代理未启动、参数校验、23 种损坏回复、4096 字节边界。BAT 的全部 64 + 20 组用例在 M1 补齐 |
+| 1 编译 `ProxyBridgeCore.dll` | ✅ CI 用 MSVC 从子模块源码编译通过，`TestCoreABI` 在自编 DLL 上通过 | CI 运行 #1、#2。自编 DLL 的真实游戏测试待补（见 §2） |
+| 2 Go 不用 cgo 调用 DLL，原生线程回调 | ✅ | 连续运行 4 小时 58 分，约 7.3 万次连接进程查询，日志零丢失；`-conns` 测试 3 分钟内收到数百条连接事件，零丢失 |
+| 3 嵌入的核心连真实节点 | ✅ | 日本中转配置：出口 IPv4 查询成功；到中转 53 ms、到游戏 147 ms，均为 3/3 成功 |
+| 4 冒险岛实测 | ✅ | 日本中转连续加速 4 小时 58 分，累计 975 条加速连接，游戏期间稳定保持 7 条；MapleLegends 登录（8484）、频道（7579）以及 `nexon_client.exe` 都走了加速 |
+| 5 停止后驱动状态 | ✅ | 每次停止后 WinDivert 都是 STOPPED；之后服务项被系统自动删除（下次启动前为 NOT_INSTALLED） |
+| 6 防火墙规则是否必要 | 待 M1 | 需要我们自己编译、打了补丁 P1 的 DLL；官方 DLL 每次启动都会重新添加该规则 |
+| 7 性能基线 | 未测（可选） | 移到 M4 验收 |
+| 8 Wails 以管理员运行 | ✅ | 窗口和文件选择框正常。文件类型的文字已按要求改为“MSBOOST 节点配置” |
+| 9 托盘图标 | 部分 ✅ | 关闭窗口后程序留在托盘继续运行；托盘菜单、单实例、退出后图标消失待确认（§2） |
+| 10 UDP 经嵌入的核心 | ✅ | 带会话凭据的 UDP ASSOCIATE 建立成功，断线后自动重建。这次冒险岛没有产生 UDP 流量，可用 Discord 语音实测（§2，可选） |
+| 只代理冒险岛（规划 §7.4） | ✅ | `-conns` 日志中只有冒险岛相关进程是 Proxy；浏览器、Telegram、Discord、xray、DNS 等全部 Direct，本程序连节点的连接也是 Direct |
 
-## 2. 需要你在本机执行的测试
+### 观察到的问题
 
-### 准备
+- 21:31，一次到 `g.nexonstatic.com:443` 的连接被节点拒绝。
+  - 开启“发送域名”时由节点解析，节点规则 `msboost-filter`（GFW 规则集）会拒绝其中的域名；也可能是偶发失败。游戏不受影响。
+- 02:13，到节点的会话断了一次（UDP 控制连接被关闭），其间一个 CONNECT 失败，约 5 秒后自动恢复，之后活动连接数仍是 7。
+  - 以后可以在界面上加“节点连接中断/已恢复”的提示。
 
-1. 把节点配置（例如 `直连.json`）复制到 `_local\configs\`。该目录已加入 `.gitignore`，不会提交。
-2. 退出冒险岛，关闭官方 ProxyBridge 窗口。
-3. 打开“以管理员身份运行”的命令行，依次执行：
+### 2026-10-13 的变更
+
+- 核心升级到 mieru **3.38.1**。它修复了 SOCKS5 认证漏洞：
+  - 3.38.0 在客户端同时提出“无认证”和“用户名密码”两种方式时，会放行“无认证”；
+  - 新增的回归测试 `TestEngineNeverFallsBackToNoAuth` 锁住了这一点。
+- 用户可见的文字统一显示 MSBOOST。核心库自己的日志加 `[核心]` 前缀，分流日志加 `[分流]` 前缀。
+- 新增 Discord、Steam 两个可选加速项：`m0spike run -discord`、`-steam`。
+- `-core` 指向的文件不存在时，给出明确提示。
+
+## 2. 还可以补做的测试（可选）
+
+`_local\m0\m0spike.exe` 已用新版本重新编译。下面的测试都在“以管理员身份运行”的命令行中执行，并先进入 `cd /d F:\AI\Claude\MSBOOST启动器\_local\m0`。
+
+### 用我们自己编译的 DLL 再跑一次（对应第 1 项）
+
+1. 打开 GitHub 仓库的 Actions 页面，进入最新一次通过的 `ci` 运行，在页面底部的 Artifacts 下载 `m0-windows-x64`（需要登录 GitHub）。
+2. 把压缩包解压到 `F:\AI\Claude\MSBOOST启动器\_local\ci\`，确认存在 `_local\ci\core\ProxyBridgeCore.dll`。
+3. 执行：
 
    ```bat
-   sc stop ProxyBridgeSvc
-   cd /d F:\AI\Claude\MSBOOST启动器\_local\m0
-   m0spike svc
+   m0spike run -config ..\configs\直连.json -core ..\ci\core\ProxyBridgeCore.dll
    ```
 
-   `svc` 的输出中，`ProxyBridgeSvc` 应为 `STOPPED`，并且中继端口显示“空闲”。
+### 托盘（对应第 9 项）
 
-### 测试 A：嵌入的 mieru 是否正常（对应第 3 项，无需管理员）
+1. 右键托盘图标，在菜单里点“开始加速”“停止加速”，窗口中的状态应同步变化。
+2. 程序运行时再双击一次 exe：不会开第二个，而是把现有窗口调到前面。
+3. 托盘菜单选“退出”：程序退出，托盘图标消失。
 
-```bat
-m0spike probe -config ..\configs\直连.json
-```
+你上次打开的 `MSBOOST-Launcher.exe` 目前还在托盘里运行，测试时可以直接用它，最后用“退出”关闭。
 
-预期：输出三项结果，与旧 BAT 菜单 [3] 在同一量级，出口 IPv4 一致。
-
-### 测试 B：完整加速（对应第 2、4、5、10 项，需要管理员）
+### Discord 语音走加速（对应第 10 项，验证真实 UDP 流量）
 
 ```bat
-m0spike run -config ..\configs\直连.json
+m0spike run -config ..\configs\直连.json -discord -conns -duration 5m
 ```
 
-1. 看到“加速已开始”后，打开冒险岛。
-2. 依次完成：登录、进频道、换频道、进商城、组队，然后保持游戏 30 分钟以上。
-3. 期间每 10 秒会打印一行 `[状态]`，其中“经加速的 SOCKS5 连接”应大于 0。
-4. 结束时先退出游戏，再在命令行窗口按 `Ctrl+C`，等待输出“M0 结果摘要”。
-
-如果想无人值守跑 1 小时，看原生线程回调是否稳定，可以加 `-duration 1h`。
-
-### 测试 C：只代理冒险岛（可选，对应 §7.4）
-
-```bat
-m0spike run -config ..\configs\直连.json -conns -duration 3m
-```
-
-运行期间用浏览器打开几个网站。日志 `[连接]` 行中，浏览器的连接应是 DIRECT，冒险岛相关进程的连接应是 PROXY。
-
-### 测试 D：性能基线（可选，对应第 7 项）
-
-分别在“测试 B 运行中”和“已停止”两种状态下，用测速网站各测一次下载和上传速度，记录两组数字。
-
-### 测试 E：界面与托盘（对应第 8、9 项）
-
-界面目前只是外壳：“加速”按钮是**模拟**的，不会真的分流；“选择配置文件”会用正式的解析器校验你的配置。
-
-1. 双击 `build\bin\MSBOOST-Launcher.exe`，在 UAC 弹窗中点“是”。程序未签名，如果 SmartScreen 拦截，点“更多信息 → 仍要运行”。
-2. 窗口中“管理员权限”应显示“是”。
-3. 点“选择配置文件…”，选择 `直连.json`：应显示方案名和入口地址，不显示密码。
-4. 点“开始加速”，状态变为“加速中（模拟）”。右键托盘图标，菜单项应同步变为“停止加速”；在托盘菜单里切换，窗口里的状态也应跟着变。
-5. 点窗口右上角的 ×：窗口隐藏，托盘图标仍在。左键单击托盘图标，窗口重新出现。
-6. 程序运行时再双击一次 exe：不会开第二个，而是把现有窗口调到前面。
-7. 托盘菜单选“退出”：程序退出，托盘图标消失。把鼠标移到托盘区，确认没有残留的“幽灵图标”。
+期间进入一个 Discord 语音频道说几句话。日志中应出现 `Discord.exe ... Proxy` 的 UDP 连接，语音正常。
 
 ### 结束后
 
-- 把 `_local\m0\` 下生成的 `m0spike-*.log` 发给我。日志里可能有节点地址，不要公开发布。
-- 恢复官方 ProxyBridge：`sc start ProxyBridgeSvc`。
-- 官方核心会为 `m0spike.exe` 添加一条防火墙入站规则。规则名以 `m0spike svc` 的输出为准，exe 路径变了名字也会变。清理命令：
+- 把新生成的 `m0spike-*.log` 发给我（在 `_local\m0\`）。日志里有节点地址，不要公开发布。
+- 防火墙规则清理命令（规则名以 `m0spike svc` 的输出为准）：
 
   ```bat
   netsh advfirewall firewall delete rule name="ProxyBridge relay 1c178a39"
   ```
 
-## 3. 结果记录
+## 3. 测试命令参考
 
-| 规划项 | 结果 | 备注 |
-|---|---|---|
-| 1 编译 DLL | ✅ CI 运行 #1 用 MSVC 编译通过，`TestCoreABI` 在自编 DLL 上通过 | 本机仍无 MSVC，本地行为测试用官方 DLL |
-| 2 Go 调用 DLL、原生线程回调 | 接口 ✅；压力待测试 B | |
-| 3 嵌入 mieru | 本地 ✅；真实节点待测试 A | |
-| 4 冒险岛实测 | 待测试 B | |
-| 5 停止后驱动状态 | 待测试 B 摘要 | |
-| 6 防火墙规则是否必要 | 需要我们自己编译的 DLL（补丁 P1）后再测 | 官方 DLL 每次启动都会重新添加该规则，无法关闭 |
-| 7 性能基线 | 待测试 D | |
-| 8 Wails 管理员运行 | 已构建（Wails v2.16.0，exe 内嵌 requireAdministrator 清单）；待测试 E | |
-| 9 托盘图标 | 已实现（`fyne.io/systray` v1.12.2，在独立锁定线程上运行）；待测试 E | |
-| 10 UDP 经嵌入的 mieru | 待测试 B（规则为 BOTH） | |
+| 命令 | 用途 |
+|---|---|
+| `m0spike svc` | 查看权限、服务状态、中继端口、防火墙规则名（无需管理员） |
+| `m0spike probe -config 配置.json [-game IP:端口]` | 只启动核心，执行三项网络检测（无需管理员） |
+| `m0spike run -config 配置.json [-core DLL] [-conns] [-discord] [-steam] [-duration 30m]` | 完整加速（需要管理员） |
+
+做加速测试前需要先关闭官方 ProxyBridge：在管理员命令行执行 `sc stop ProxyBridgeSvc`。

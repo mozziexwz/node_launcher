@@ -54,7 +54,7 @@ func Start(cfg *Config, listenPort int) (*Engine, error) {
 	resolver := &net.Resolver{}
 	mux, err := appctlcommon.NewClientMuxFromProfile(cfg.Profile, nil, nil, resolver, nil)
 	if err != nil {
-		return nil, fmt.Errorf("创建 mieru 客户端失败：%w", err)
+		return nil, fmt.Errorf("MSBOOST 核心启动失败：%w", err)
 	}
 	server, err := socks5.New(&socks5.Config{
 		UseProxy:    true,

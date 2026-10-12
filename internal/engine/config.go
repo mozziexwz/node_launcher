@@ -37,7 +37,7 @@ func LoadConfigFile(path string) (*Config, error) {
 func ParseConfig(b []byte) (*Config, error) {
 	client := &appctlpb.ClientConfig{}
 	if err := common.UnmarshalJSON(b, client); err != nil {
-		return nil, fmt.Errorf("不是有效的 mieru 客户端配置：%w", err)
+		return nil, fmt.Errorf("不是有效的 MSBOOST 节点配置：%w", err)
 	}
 	if err := appctl.ValidateFullClientConfig(client); err != nil {
 		return nil, fmt.Errorf("配置校验失败：%w", err)

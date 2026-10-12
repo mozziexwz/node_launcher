@@ -5,7 +5,7 @@
 ## mieru
 
 - 来源：<https://github.com/enfein/mieru>
-- 版本：v3.38.0
+- 版本：v3.38.1
 - 许可：GPL-3.0
 - 使用方式：作为 Go 模块编译进程序（客户端多路复用与本地 SOCKS5 服务端）。
 

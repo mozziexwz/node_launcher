@@ -22,6 +22,34 @@ func TestDefaultMapleStory(t *testing.T) {
 	}
 }
 
+func TestAddons(t *testing.T) {
+	game := make(map[string]bool)
+	for _, p := range DefaultMapleStory().Processes {
+		game[strings.ToLower(p)] = true
+	}
+	ids := make(map[string]bool)
+	for _, a := range Addons() {
+		if a.ID == "" || ids[a.ID] {
+			t.Fatalf("addon id %q empty or duplicated", a.ID)
+		}
+		ids[a.ID] = true
+		if len(a.Processes) == 0 || a.Protocol != ProtocolBoth {
+			t.Fatalf("addon %s: unexpected definition %+v", a.ID, a)
+		}
+		for _, p := range a.Processes {
+			if err := ValidateProcessName(p); err != nil {
+				t.Fatalf("addon %s: %v", a.ID, err)
+			}
+			if game[strings.ToLower(p)] {
+				t.Fatalf("addon %s overlaps the game list with %s", a.ID, p)
+			}
+		}
+	}
+	if !ids["discord"] || !ids["steam"] {
+		t.Fatal("Discord and Steam addons are required")
+	}
+}
+
 func TestValidateProcessName(t *testing.T) {
 	for _, ok := range []string{"MapleStory.exe", "Kaizen v92.exe", "Maple*.exe", "BlackCipher64.aes"} {
 		if err := ValidateProcessName(ok); err != nil {

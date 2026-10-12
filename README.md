@@ -5,13 +5,13 @@
 - 只代理冒险岛相关进程，其他软件直连。
 - 不改路由表、DNS 和系统代理，也不装虚拟网卡。
 
-> **状态：M0 技术验证进行中，尚不可用。** 规划见 [docs/MSBOOST一体化启动器开发规划.md](docs/MSBOOST一体化启动器开发规划.md)。
+> **状态：M0 主要验证已完成（结果见 [docs/m0/README.md](docs/m0/README.md)），下一步 M1；尚不可用。** 规划见 [docs/MSBOOST一体化启动器开发规划.md](docs/MSBOOST一体化启动器开发规划.md)。
 
 ## 组成
 
 | 组件 | 版本 | 用途 |
 |---|---|---|
-| [mieru](https://github.com/enfein/mieru) | v3.38.0 | 进程内嵌入，提供本地 SOCKS5（只监听 127.0.0.1，端口随机，每次启动生成会话凭据） |
+| [mieru](https://github.com/enfein/mieru) | v3.38.1 | 进程内嵌入，提供本地 SOCKS5（只监听 127.0.0.1，端口随机，每次启动生成会话凭据） |
 | [ProxyBridge](https://github.com/InterceptSuite/ProxyBridge) 核心 | v4.1.0 | 编译为 `ProxyBridgeCore.dll`，基于 WinDivert 把指定进程的流量转进本地 SOCKS5 |
 | [WinDivert](https://github.com/basil00/WinDivert) | 2.2.2-A | 官方签名的驱动与库，原样分发 |
 | [Wails](https://wails.io) v2 + React/TypeScript | — | 界面（M0 搭建） |

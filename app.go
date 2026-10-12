@@ -92,8 +92,8 @@ func (a *App) ToggleAcceleration() Status {
 // with the real engine parser.
 func (a *App) PickConfig() (*ConfigInfo, error) {
 	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title:   "选择节点配置",
-		Filters: []runtime.FileFilter{{DisplayName: "mieru 客户端配置 (*.json)", Pattern: "*.json"}},
+		Title:   "选择 MSBOOST 节点配置",
+		Filters: []runtime.FileFilter{{DisplayName: "MSBOOST 节点配置 (*.json)", Pattern: "*.json"}},
 	})
 	if err != nil {
 		return nil, err
