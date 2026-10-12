@@ -1,0 +1,9 @@
+* text=auto eol=lf
+
+# Windows 脚本保持 CRLF
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 旧版参考文件保持原始字节（BAT 依赖 UTF-8 无 BOM + CRLF）
+legacy/** -text

@@ -1,0 +1,4 @@
+[submodule "third_party/ProxyBridge"]
+	path = third_party/ProxyBridge
+	url = https://github.com/InterceptSuite/ProxyBridge.git
+	shallow = true

@@ -1,0 +1,25 @@
+# 本地资料：旧版原件（含节点 IP）、真实节点配置、个人测试文件，一律不提交
+/_local/
+
+# 构建产物与缓存
+/build/bin/
+/.cache/
+/dist/
+/frontend/node_modules/
+/frontend/dist/
+/frontend/wailsjs/
+
+# 二进制（ProxyBridgeCore.dll、WinDivert、mieru 等均由脚本或 CI 获取/生成）
+*.exe
+*.dll
+*.sys
+*.lib
+
+# 用户状态、真实配置与日志
+msboost-state.dat
+*.pbprofile
+*.log
+
+# 编辑器
+.vscode/
+.idea/
