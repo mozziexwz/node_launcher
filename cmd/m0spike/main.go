@@ -185,7 +185,8 @@ func cmdSvc() error {
 		logf("ProxyBridge 中继端口 34010/TCP：空闲")
 	}
 	if exe, err := os.Executable(); err == nil {
-		logf("本程序对应的防火墙规则名：%s", redirector.FirewallRuleName(exe))
+		names := redirector.FirewallRuleNames(exe)
+		logf("本程序对应的防火墙规则名：%s（自编核心）、%s（官方核心）", names[0], names[1])
 	}
 	return nil
 }
@@ -466,9 +467,15 @@ func cmdRun(args []string) error {
 	}
 	started := time.Now()
 	exe, _ := os.Executable()
-	rule := redirector.FirewallRuleName(exe)
+	// The official build (installed under Program Files) uses its own rule
+	// prefix; our patched build uses the MSBOOST one.
+	ruleNames := redirector.FirewallRuleNames(exe)
+	rule := ruleNames[0]
+	if strings.Contains(strings.ToLower(core.Path), `\program files\proxybridge\`) {
+		rule = ruleNames[1]
+	}
 	logf("加速已开始。现在可以打开冒险岛。按 Ctrl+C 停止。")
-	logf("说明：官方核心会为本程序添加防火墙入站规则“%s”，测试结束后可执行：", rule)
+	logf("说明：核心会为本程序添加防火墙入站规则“%s”，测试结束后可执行：", rule)
 	logf("  netsh advfirewall firewall delete rule name=\"%s\"", rule)
 
 	stop := waitSignal()

@@ -148,10 +148,17 @@ func hasIPv6() bool {
 	return true
 }
 
-// FirewallRuleName is the inbound rule the unpatched ProxyBridge core adds
-// for the host executable: "ProxyBridge relay " plus the FNV-1a hash of the
-// ASCII-lower-cased UTF-16 path (see fw_ensure_thread in ProxyBridge.c).
-func FirewallRuleName(exePath string) string {
+// Prefixes of the inbound firewall rule the core adds for its host program:
+// our patched build (third_party/patches/0001) and the official build.
+const (
+	RulePrefixPatched  = "MSBOOST relay"
+	RulePrefixOfficial = "ProxyBridge relay"
+)
+
+// FirewallRuleNames lists the rule names the core may have added for the
+// executable at exePath, patched build first. The suffix is the FNV-1a hash
+// of the ASCII-lower-cased UTF-16 path (fw_ensure_thread in ProxyBridge.c).
+func FirewallRuleNames(exePath string) []string {
 	h := uint32(2166136261)
 	for _, c := range utf16.Encode([]rune(exePath)) {
 		if c >= 'A' && c <= 'Z' {
@@ -159,5 +166,8 @@ func FirewallRuleName(exePath string) string {
 		}
 		h = (h ^ uint32(c)) * 16777619
 	}
-	return fmt.Sprintf("ProxyBridge relay %08x", h)
+	return []string{
+		fmt.Sprintf("%s %08x", RulePrefixPatched, h),
+		fmt.Sprintf("%s %08x", RulePrefixOfficial, h),
+	}
 }

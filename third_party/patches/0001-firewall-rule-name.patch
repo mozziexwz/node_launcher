@@ -1,0 +1,20 @@
+--- a/ProxyBridge.c
++++ b/ProxyBridge.c
+@@ -1131,7 +1131,7 @@
+     unsigned h = 2166136261u;
+     for (const wchar_t *p = exe; *p; p++) { wchar_t c = *p; if (c >= L'A' && c <= L'Z') c += 32; h = (h ^ (unsigned)c) * 16777619u; }
+     wchar_t name[96];
+-    _snwprintf_s(name, 96, _TRUNCATE, L"ProxyBridge relay %08x", h);
++    _snwprintf_s(name, 96, _TRUNCATE, L"MSBOOST relay %08x", h);
+ 
+     wchar_t args[1300];
+     _snwprintf_s(args, 1300, _TRUNCATE, L"show rule name=\"%s\"", name);
+@@ -1139,7 +1139,7 @@
+ 
+     _snwprintf_s(args, 1300, _TRUNCATE,
+         L"add rule name=\"%s\" dir=in action=allow program=\"%s\" enable=yes profile=any "
+-        L"description=\"Lets ProxyBridge's local relay receive redirected connections on every network profile (VPN adapters are Public).\"",
++        L"description=\"Lets the MSBOOST launcher's local relay receive redirected game connections on every network profile (VPN adapters are Public).\"",
+         name, exe);
+     if (fw_run(args, 15000) == 0)
+         log_message("Windows Firewall: added an inbound allow rule for %ls on all network profiles "

@@ -77,16 +77,19 @@ func TestCoreABI(t *testing.T) {
 	}
 }
 
-func TestFirewallRuleName(t *testing.T) {
-	a := FirewallRuleName(`C:\Program Files\MSBOOST\MSBOOST-Launcher.exe`)
-	b := FirewallRuleName(`c:\program files\msboost\msboost-launcher.exe`)
-	if a != b {
-		t.Fatalf("rule name must ignore ASCII case: %s vs %s", a, b)
+func TestFirewallRuleNames(t *testing.T) {
+	a := FirewallRuleNames(`C:\Program Files\MSBOOST\MSBOOST-Launcher.exe`)
+	b := FirewallRuleNames(`c:\program files\msboost\msboost-launcher.exe`)
+	if len(a) != 2 || a[0] != b[0] || a[1] != b[1] {
+		t.Fatalf("rule names must ignore ASCII case: %v vs %v", a, b)
 	}
-	if !strings.HasPrefix(a, "ProxyBridge relay ") || len(a) != len("ProxyBridge relay ")+8 {
-		t.Fatalf("unexpected rule name %q", a)
+	if !strings.HasPrefix(a[0], "MSBOOST relay ") || len(a[0]) != len("MSBOOST relay ")+8 {
+		t.Fatalf("unexpected patched rule name %q", a[0])
 	}
-	if a == FirewallRuleName(`F:\AI\Claude\MSBOOST启动器\m0spike.exe`) {
+	if !strings.HasPrefix(a[1], "ProxyBridge relay ") || a[0][len("MSBOOST relay "):] != a[1][len("ProxyBridge relay "):] {
+		t.Fatalf("official rule name %q must share the hash of %q", a[1], a[0])
+	}
+	if a[0] == FirewallRuleNames(`F:\AI\Claude\MSBOOST启动器\m0spike.exe`)[0] {
 		t.Fatal("different paths should hash differently")
 	}
 }
