@@ -43,7 +43,7 @@ func usage() {
   use <配置文件名>             选择节点配置
   target <IP:端口>             设置全程测速目标
   addon <discord|steam> <on|off>  可选加速开关
-  check                        网络检测：出口 IP、到中转、到游戏
+  check                        网络检测：到游戏服务器 IPv4、到中转、到游戏
   run [-duration 30m]          开始加速，Ctrl+C 停止（需要管理员）
   clean                        清理驱动、防火墙规则与运行文件（需要管理员）
 
@@ -280,9 +280,9 @@ func cmdCheck(e *env) error {
 		return err
 	}
 	if r.ExitIPError != "" {
-		fmt.Printf("当前出口 IPv4：查询失败；%s\n", r.ExitIPError)
+		fmt.Printf("当前到游戏服务器 IPv4：查询失败；%s\n", r.ExitIPError)
 	} else {
-		fmt.Printf("当前出口 IPv4：%s\n", r.ExitIP)
+		fmt.Printf("当前到游戏服务器 IPv4：%s\n", r.ExitIP)
 	}
 	fmt.Printf("当前到中转服务器延迟：%s　%s\n", r.Entrance.Compact(), detail(r.EntranceTarget, r.Entrance.Detail()))
 	fmt.Printf("当前到游戏服务器延迟：%s　%s\n", r.Game.Compact(), detail(r.GameTarget, r.Game.Detail()))
@@ -303,7 +303,7 @@ func cmdRun(e *env, duration time.Duration) error {
 		return err
 	}
 	defer e.ctl.Shutdown()
-	fmt.Println("加速已开始。现在可以打开冒险岛。按 Ctrl+C 停止。")
+	fmt.Println("加速已开始。现在可以打开 MapleStory。按 Ctrl+C 停止。")
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
@@ -317,8 +317,10 @@ func cmdRun(e *env, duration time.Duration) error {
 		select {
 		case <-ticker.C:
 			st := e.ctl.Status()
-			fmt.Printf("%s [状态] 已运行 %v｜经加速的连接：累计 %d，当前 %d\n",
-				time.Now().Format("15:04:05"), time.Since(st.Since).Round(time.Second), st.Accepted, st.Active)
+			fmt.Printf("%s [状态] 已运行 %v｜已使用流量 %s｜当前速率 ↑ %s/s ↓ %s/s｜经加速的连接：累计 %d，当前 %d\n",
+				time.Now().Format("15:04:05"), time.Since(st.Since).Round(time.Second),
+				app.FormatBytes(st.Upload+st.Download), app.FormatBytes(st.UploadRate), app.FormatBytes(st.DownloadRate),
+				st.Accepted, st.Active)
 		case <-stop:
 			fmt.Println("正在停止……")
 			return e.ctl.Stop()

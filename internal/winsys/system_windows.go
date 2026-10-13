@@ -109,6 +109,42 @@ func DeleteFirewallRule(name string) (deleted bool, err error) {
 	return false, fmt.Errorf("删除防火墙规则失败：%v（%s）", err, strings.TrimSpace(string(out)))
 }
 
+// DeleteFirewallRulesWithPrefix removes every rule whose display name starts
+// with prefix and returns the removed names (needs elevation). It goes
+// through Get-NetFirewallRule because netsh's listing is localized.
+func DeleteFirewallRulesWithPrefix(prefix string) ([]string, error) {
+	if prefix == "" || strings.ContainsAny(prefix, `'*?[]`+"`$") {
+		return nil, fmt.Errorf("无效的规则前缀：%q", prefix)
+	}
+	// A name is printed only after its rule is gone; a failed removal stops
+	// the script with a non-zero exit code.
+	script := "Get-NetFirewallRule -DisplayName '" + prefix + "*' -ErrorAction SilentlyContinue | " +
+		"ForEach-Object { $_ | Remove-NetFirewallRule -ErrorAction Stop; $_.DisplayName }"
+	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
+	out, err := cmd.CombinedOutput()
+	names, rest := parseRuleNames(string(out), prefix)
+	if err != nil {
+		return names, fmt.Errorf("删除防火墙规则失败：%v（%s）", err, rest)
+	}
+	return names, nil
+}
+
+// parseRuleNames separates the printed rule names from any other output.
+func parseRuleNames(output, prefix string) (names []string, rest string) {
+	var other []string
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, prefix):
+			names = append(names, line)
+		case line != "":
+			other = append(other, line)
+		}
+	}
+	return names, strings.Join(other, " ")
+}
+
 // ProgramDataDir is %ProgramData%\MSBOOST, where released runtime files live.
 func ProgramDataDir() string {
 	base := os.Getenv("ProgramData")

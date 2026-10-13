@@ -92,11 +92,16 @@ func TestHistoryAndSubscribers(t *testing.T) {
 	if len(recent) != 3 || recent[2].Text != fmt.Sprintf("line %d", historySize+19) {
 		t.Fatalf("recent %+v", recent)
 	}
+	for i, line := range recent {
+		if want := uint64(historySize + 18 + i); line.Seq != want {
+			t.Fatalf("recent[%d].Seq = %d, want %d", i, line.Seq, want)
+		}
+	}
 	if got := len(l.Recent(0)); got != historySize {
 		t.Fatalf("history keeps %d lines, want %d", got, historySize)
 	}
 	first := <-ch
-	if first.Text != "line 0" || first.Tag != App {
+	if first.Text != "line 0" || first.Tag != App || first.Seq != 1 {
 		t.Fatalf("first event %+v", first)
 	}
 	cancel()

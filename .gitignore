@@ -6,6 +6,7 @@
 /build/core/
 /build/m0/
 /build/m1/
+/build/m2/
 /.cache/
 /dist/
 /frontend/node_modules/

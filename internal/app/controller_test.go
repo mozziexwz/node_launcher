@@ -32,9 +32,11 @@ type fakeEngine struct {
 
 func (e *fakeEngine) Addr() *net.TCPAddr           { return e.addr }
 func (e *fakeEngine) Credential() (string, string) { return e.user, e.password }
-func (e *fakeEngine) Stats() engine.Stats          { return engine.Stats{Accepted: 5, Active: 2} }
-func (e *fakeEngine) Close() error                 { e.mu.Lock(); e.closed++; e.mu.Unlock(); return nil }
-func (e *fakeEngine) closeCount() int              { e.mu.Lock(); defer e.mu.Unlock(); return e.closed }
+func (e *fakeEngine) Stats() engine.Stats {
+	return engine.Stats{Accepted: 5, Active: 2, Upload: 3072, Download: 1 << 20, UploadRate: 100, DownloadRate: 2048}
+}
+func (e *fakeEngine) Close() error    { e.mu.Lock(); e.closed++; e.mu.Unlock(); return nil }
+func (e *fakeEngine) closeCount() int { e.mu.Lock(); defer e.mu.Unlock(); return e.closed }
 
 type fakeRedirector struct {
 	mu           sync.Mutex
@@ -230,6 +232,9 @@ func TestStartStopHappyPath(t *testing.T) {
 	if st.State != StateRunning || st.Config != "直连.json" || st.Accepted != 5 || st.Active != 2 || st.Since.IsZero() {
 		t.Fatalf("status %+v", st)
 	}
+	if st.Upload != 3072 || st.Download != 1<<20 || st.UploadRate != 100 || st.DownloadRate != 2048 {
+		t.Fatalf("traffic %+v", st)
+	}
 	calls, _, _ := h.red.snapshot()
 	game := profiles.DefaultMapleStory().ProcessList()
 	want := []string{"prepare", "add-socks5 127.0.0.1:40000 session-user-0 domain=true", "add-rule " + game, "start"}
@@ -402,6 +407,24 @@ func TestAddonSwitchesLive(t *testing.T) {
 	}
 	if calls, _, _ := h.red.snapshot(); strings.Contains(calls[len(calls)-1], "steam") {
 		t.Fatal("an idle switch must not touch the redirector")
+	}
+}
+
+func TestPreflightSkipsConflictsWhileRunning(t *testing.T) {
+	h := newHarness(t, nil)
+	if _, err := h.c.Start(); err != nil {
+		t.Fatal(err)
+	}
+	// Our own relay now holds the port that the conflict check looks for.
+	h.sys.conflicts = []Conflict{{Message: "分流所需的本地端口被占用", Blocking: true}}
+	if _, conflicts := h.c.Preflight(); len(conflicts) != 0 {
+		t.Fatalf("conflicts while running: %v", conflicts)
+	}
+	if err := h.c.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if _, conflicts := h.c.Preflight(); len(conflicts) != 1 {
+		t.Fatalf("conflicts while idle: %v", conflicts)
 	}
 }
 

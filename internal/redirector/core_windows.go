@@ -122,7 +122,7 @@ func (c *Core) AddProxyConfig(t ProxyType, host string, port uint16, user, passw
 	runtime.KeepAlive(u)
 	runtime.KeepAlive(p)
 	if id == 0 {
-		return 0, errors.New("ProxyBridge 拒绝了代理配置")
+		return 0, errors.New("分流核心拒绝了代理配置")
 	}
 	return id, nil
 }
@@ -147,7 +147,7 @@ func (c *Core) AddRule(processes, hosts, ports, domains string, protocol Protoco
 		uintptr(protocol), uintptr(action), uintptr(proxyID)))
 	runtime.KeepAlive(args)
 	if id == 0 {
-		return 0, errors.New("ProxyBridge 拒绝了分流规则")
+		return 0, errors.New("分流核心拒绝了分流规则")
 	}
 	return id, nil
 }

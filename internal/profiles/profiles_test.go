@@ -22,6 +22,20 @@ func TestDefaultMapleStory(t *testing.T) {
 	}
 }
 
+func TestDisplayGroupsCoverTheListExactlyOnce(t *testing.T) {
+	var grouped []string
+	for _, g := range DisplayGroups() {
+		if g.Name == "" || len(g.Processes) == 0 {
+			t.Fatalf("empty group %+v", g)
+		}
+		grouped = append(grouped, g.Processes...)
+	}
+	want := DefaultMapleStory().Processes
+	if strings.Join(grouped, ";") != strings.Join(want, ";") {
+		t.Fatalf("groups must list every process once, in order:\n%v\n%v", grouped, want)
+	}
+}
+
 func TestAddons(t *testing.T) {
 	game := make(map[string]bool)
 	for _, p := range DefaultMapleStory().Processes {

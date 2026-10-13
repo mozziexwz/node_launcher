@@ -1,7 +1,7 @@
 # MSBOOST 一体化启动器开发规划
 
 > 仓库：<https://github.com/mozziexwz/node_launcher>
-> 日期：2026-10-12（2026-10-13 更新）　状态：M0 已完成（`docs/m0/README.md`）；M1 已完成并通过真实游戏验收（`docs/m1/README.md`），下一步 M2 界面。
+> 日期：2026-10-12（2026-10-13 更新）　状态：M0 已完成（`docs/m0/README.md`）；M1 已完成并通过真实游戏验收（`docs/m1/README.md`）；M2 界面已通过实测验收，第二轮界面修改也已复测通过（`docs/m2/README.md`）；下一步 M3 打包。
 >
 > 依据：
 > - `legacy/MSBOOST启动器_全程TCP测速.bat`，以及 `docs/MSBOOST全程TCP测速整改计划.md`
@@ -359,6 +359,8 @@ node_launcher/
 - **产物**：
   - 一个 `MSBOOST-Launcher.exe`，内嵌 `ProxyBridgeCore.dll`、`WinDivert.dll`、`WinDivert64.sys`；
   - 外加 `SHA256SUMS`，一起打成 zip。不做安装包。
+  - zip 里还要有 `LICENSE.txt`（GPL-3.0 全文）和 `THIRD_PARTY_NOTICES.txt`（各组件和 Go 依赖的版权声明与许可全文）。“开源许可”对话框改为显示同样的内容。
+  - 程序里不显示源代码地址，所以网站下载页要在下载链接旁注明源代码地址（GPL-3.0 第 6 条 d 款）。
 - **运行文件释放**：
   - 程序以管理员身份启动时，把内嵌的三个文件释放到 `%ProgramData%\MSBOOST\runtime\<版本哈希>\`。这个目录只允许管理员和 SYSTEM 写入。
   - 每次启动都校验 SHA-256，不一致就重新释放，然后从这里加载 DLL。
