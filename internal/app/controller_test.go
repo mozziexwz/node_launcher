@@ -141,6 +141,9 @@ type harness struct {
 	engErr   error
 	checkLog []string
 	mu       sync.Mutex
+
+	runtimeErr error
+	runtimeLog []string // "lock", then "unlock after <last redirector call>"
 }
 
 func exampleConfig(t *testing.T) map[string]any {
@@ -201,8 +204,26 @@ func newHarness(t *testing.T, mutate func(*harness)) *harness {
 			return e, nil
 		},
 		LoadRedirector: func() (Redirector, error) { h.loads++; return h.red, nil },
-		System:         h.sys,
-		Checks:         h.fakeChecks(),
+		PrepareRuntime: func() (func(), error) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			if h.runtimeErr != nil {
+				return nil, h.runtimeErr
+			}
+			h.runtimeLog = append(h.runtimeLog, "lock")
+			return func() {
+				calls, _, _ := h.red.snapshot()
+				last := "nothing"
+				if len(calls) > 0 {
+					last = calls[len(calls)-1]
+				}
+				h.mu.Lock()
+				h.runtimeLog = append(h.runtimeLog, "unlock after "+last)
+				h.mu.Unlock()
+			}, nil
+		},
+		System: h.sys,
+		Checks: h.fakeChecks(),
 	})
 	return h
 }
@@ -407,6 +428,31 @@ func TestAddonSwitchesLive(t *testing.T) {
 	}
 	if calls, _, _ := h.red.snapshot(); strings.Contains(calls[len(calls)-1], "steam") {
 		t.Fatal("an idle switch must not touch the redirector")
+	}
+}
+
+func TestRuntimeCheckedAndLockedAroundEveryStart(t *testing.T) {
+	h := newHarness(t, nil)
+	for i := 0; i < 2; i++ {
+		if _, err := h.c.Start(); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.c.Stop(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The files stay locked until the driver has started, every time.
+	if got := strings.Join(h.runtimeLog, ","); got != "lock,unlock after start,lock,unlock after start" {
+		t.Fatalf("runtime log %q", got)
+	}
+
+	h.runtimeErr = errors.New("哈希不符")
+	_, err := h.c.Start()
+	if err == nil || !strings.Contains(err.Error(), "哈希不符") {
+		t.Fatalf("start with damaged files: %v", err)
+	}
+	if len(h.engines) != 2 || h.c.Status().State != StateIdle {
+		t.Fatalf("a failed check must stop the start before anything runs (%d engines)", len(h.engines))
 	}
 }
 

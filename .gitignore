@@ -7,6 +7,7 @@
 /build/m0/
 /build/m1/
 /build/m2/
+/build/release/
 /.cache/
 /dist/
 /frontend/node_modules/

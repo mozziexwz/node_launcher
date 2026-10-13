@@ -930,6 +930,10 @@ table.components td:last-child, table.components th:last-child {
     gap: 4px 14px;
 }
 
+.modal-body .license-file {
+    margin-top: 8px;
+}
+
 .modal h3 {
     font-size: 16px;
     margin-bottom: 10px;

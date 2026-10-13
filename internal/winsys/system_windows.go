@@ -5,7 +5,6 @@ package winsys
 import (
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -146,9 +145,11 @@ func parseRuleNames(output, prefix string) (names []string, rest string) {
 }
 
 // ProgramDataDir is %ProgramData%\MSBOOST, where released runtime files live.
+// The path comes from the known-folder registry, not the ProgramData
+// environment variable, which the user can redefine for elevated processes.
 func ProgramDataDir() string {
-	base := os.Getenv("ProgramData")
-	if base == "" {
+	base, err := windows.KnownFolderPath(windows.FOLDERID_ProgramData, 0)
+	if err != nil || base == "" {
 		base = `C:\ProgramData`
 	}
 	return filepath.Join(base, "MSBOOST")

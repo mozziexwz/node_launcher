@@ -39,10 +39,12 @@ type App struct {
 	releaseLock func()
 	lockErr     error
 	settingsErr string
+	runtime     runtimeSource
 }
 
-func NewApp(layout store.Layout, log *logx.Logger, corePath, exePath string) *App {
-	a := &App{layout: layout, log: log, exePath: exePath, ctl: app.NewWindows(layout, log, corePath)}
+func NewApp(layout store.Layout, log *logx.Logger, rt runtimeSource, exePath string) *App {
+	a := &App{layout: layout, log: log, exePath: exePath, runtime: rt,
+		ctl: app.NewWindows(layout, log, rt.corePath, rt.prepare)}
 	if _, err := layout.LoadSettings(); err != nil {
 		a.settingsErr = err.Error()
 	}
@@ -67,6 +69,7 @@ func (a *App) startup(ctx context.Context) {
 	go a.pushStatus(bg)
 	go a.pushLogs(bg)
 	a.log.Printf(logx.App, "MSBOOST 启动器已启动，版本 %s，数据目录 %s", versionString(), a.layout.Root)
+	a.log.Printf(logx.App, "分流组件：%s", a.runtime.describe)
 }
 
 // pushStatus refreshes the traffic figures once a second while accelerating.
@@ -330,6 +333,7 @@ func (a *App) ExportDiagnostics() (string, error) {
 		"数据目录：" + a.layout.Root,
 		fmt.Sprintf("管理员权限：%v", elevated),
 		"加速状态：" + string(a.ctl.Status().State),
+		"分流组件：" + a.runtime.describe,
 	}
 	for _, name := range []string{redirector.WinDivertService, redirector.ProxyBridgeService} {
 		state, err := redirector.ServiceState(name)
