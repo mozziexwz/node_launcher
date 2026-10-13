@@ -21,18 +21,25 @@ type Engine struct {
 	mux      *protocol.Mux
 	server   *socks5.Server
 	listener *countingListener
+	meter    *trafficMeter
 	user     string
 	password string
 	served   chan struct{}
+	stop     chan struct{}
 
 	closeOnce sync.Once
 	closeErr  error
 }
 
-// Stats counts SOCKS5 connections accepted from local clients.
+// Stats counts SOCKS5 connections accepted from local clients and the
+// traffic with the node since the engine started, in bytes.
 type Stats struct {
-	Accepted int64
-	Active   int64
+	Accepted     int64
+	Active       int64
+	Upload       int64
+	Download     int64
+	UploadRate   int64 // bytes per second over the last second
+	DownloadRate int64
 }
 
 // Start builds the mieru multiplexer for cfg's active profile and serves
@@ -81,13 +88,21 @@ func Start(cfg *Config, listenPort int) (*Engine, error) {
 		mux:      mux,
 		server:   server,
 		listener: &countingListener{TCPListener: ln},
+		meter:    newTrafficMeter(nodeTraffic),
 		user:     user,
 		password: password,
 		served:   make(chan struct{}),
+		stop:     make(chan struct{}),
 	}
 	go func() {
 		defer close(e.served)
 		_ = server.Serve(e.listener)
+	}()
+	started := time.Now()
+	go func() {
+		t := time.NewTicker(time.Second)
+		defer t.Stop()
+		e.meter.run(started, t.C, e.stop)
 	}()
 	return e, nil
 }
@@ -102,15 +117,21 @@ func (e *Engine) Credential() (user, password string) {
 	return e.user, e.password
 }
 
-// Stats reports SOCKS5 connection counters.
+// Stats reports connection and traffic counters.
 func (e *Engine) Stats() Stats {
-	return Stats{Accepted: e.listener.accepted.Load(), Active: e.listener.active.Load()}
+	up, down := e.meter.totals()
+	upRate, downRate := e.meter.rates()
+	return Stats{
+		Accepted: e.listener.accepted.Load(), Active: e.listener.active.Load(),
+		Upload: up, Download: down, UploadRate: upRate, DownloadRate: downRate,
+	}
 }
 
 // Close stops accepting SOCKS5 connections and closes the mieru multiplexer,
 // which also ends the proxied connections still using it.
 func (e *Engine) Close() error {
 	e.closeOnce.Do(func() {
+		close(e.stop)
 		_ = e.server.Close()
 		select {
 		case <-e.served:

@@ -367,6 +367,12 @@ nav {
     user-select: text;
 }
 
+.sidebar-foot .home-link {
+    margin-top: 2px;
+    font-weight: 700;
+    letter-spacing: .5px;
+}
+
 .content {
     flex: 1;
     min-width: 0;
@@ -529,6 +535,21 @@ nav {
     margin-top: 6px;
     color: var(--sub);
     font-variant-numeric: tabular-nums;
+}
+
+.hero-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 22px;
+}
+
+.hero-stats b {
+    color: var(--ink);
+    font-weight: 600;
+}
+
+.hero-stats b + b {
+    margin-left: 10px;
 }
 
 .hero-button {

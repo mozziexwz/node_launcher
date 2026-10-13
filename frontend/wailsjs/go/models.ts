@@ -213,22 +213,6 @@ export namespace main {
 	        this.exists = source["exists"];
 	    }
 	}
-	export class LegacyResultDTO {
-	    imported: string[];
-	    skipped: string[];
-	    current: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new LegacyResultDTO(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.imported = source["imported"];
-	        this.skipped = source["skipped"];
-	        this.current = source["current"];
-	    }
-	}
 	
 	export class LogLineDTO {
 	    seq: number;
@@ -252,8 +236,10 @@ export namespace main {
 	    state: string;
 	    config: string;
 	    sinceUnix: number;
-	    accepted: number;
-	    active: number;
+	    upload: number;
+	    download: number;
+	    uploadRate: number;
+	    downloadRate: number;
 	    lastError: string;
 	    addons: Record<string, boolean>;
 	
@@ -266,8 +252,10 @@ export namespace main {
 	        this.state = source["state"];
 	        this.config = source["config"];
 	        this.sinceUnix = source["sinceUnix"];
-	        this.accepted = source["accepted"];
-	        this.active = source["active"];
+	        this.upload = source["upload"];
+	        this.download = source["download"];
+	        this.uploadRate = source["uploadRate"];
+	        this.downloadRate = source["downloadRate"];
 	        this.lastError = source["lastError"];
 	        this.addons = source["addons"];
 	    }

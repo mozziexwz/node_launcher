@@ -9,7 +9,7 @@ export function Configs(props: {
 }) {
     const o = props.overview
     const idle = o.status.state === 'idle'
-    const [message, setMessage] = useState<{kind: 'error' | 'info' | 'warn', text: string} | null>(null)
+    const [message, setMessage] = useState<{kind: 'error' | 'info', text: string} | null>(null)
 
     const run = async (fn: () => Promise<void>) => {
         setMessage(null)
@@ -32,17 +32,6 @@ export function Configs(props: {
         setMessage({kind: 'info', text: `已导入 ${result.name}`})
     })
 
-    const importLegacy = () => run(async () => {
-        const r = await api.importLegacy()
-        const imported = r.imported ?? []
-        const skipped = r.skipped ?? []
-        if (imported.length === 0 && skipped.length === 0) return
-        const parts = [`已导入 ${imported.length} 个配置`]
-        if (r.current) parts.push(`已选择旧版最后使用的“${r.current}”`)
-        if (skipped.length) parts.push(`跳过 ${skipped.length} 个无效文件：${skipped.join('；')}`)
-        setMessage({kind: skipped.length ? 'warn' : 'info', text: parts.join('，')})
-    })
-
     const remove = (name: string) => run(async () => {
         if (!await props.confirm('删除配置', `确定从 configs 文件夹删除“${name}”吗？`, '删除', true)) return
         await api.deleteConfig(name)
@@ -52,7 +41,6 @@ export function Configs(props: {
         <div className="page">
             <Card title="节点配置" actions={<>
                 <button className="primary" onClick={importFile}>导入配置文件…</button>
-                <button onClick={importLegacy}>从旧版启动器导入…</button>
                 <button onClick={() => api.openFolder('configs')}>打开配置文件夹</button>
                 <button onClick={() => props.refresh()}>刷新</button>
             </>}>

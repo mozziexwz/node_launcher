@@ -125,6 +125,19 @@ export function useClock(active: boolean) {
     }, [active])
 }
 
+const byteUnits = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
+
+// formatBytes matches Netch: binary units with at most two decimals.
+export function formatBytes(n: number): string {
+    let v = n
+    let i = 0
+    while (v >= 1024 && i < byteUnits.length - 1) {
+        v /= 1024
+        i++
+    }
+    return `${i === 0 ? v : Number(v.toFixed(2))} ${byteUnits[i]}`
+}
+
 export function formatUptime(sinceUnix: number): string {
     if (!sinceUnix) return '—'
     const total = Math.max(0, Math.floor((Date.now() - sinceUnix) / 1000))

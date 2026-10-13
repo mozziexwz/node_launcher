@@ -26,10 +26,6 @@ export function ImportConfig(arg1, arg2) {
   return window['go']['main']['App']['ImportConfig'](arg1, arg2);
 }
 
-export function ImportLegacyFolder() {
-  return window['go']['main']['App']['ImportLegacyFolder']();
-}
-
 export function OpenFolder(arg1) {
   return window['go']['main']['App']['OpenFolder'](arg1);
 }

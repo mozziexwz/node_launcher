@@ -9,8 +9,10 @@ export interface Status {
     state: State
     config: string
     sinceUnix: number
-    accepted: number
-    active: number
+    upload: number // bytes exchanged with the node
+    download: number
+    uploadRate: number // bytes per second
+    downloadRate: number
     lastError: string
     addons: Record<string, boolean>
 }
@@ -117,8 +119,6 @@ export const api = {
     importConfig: async (path: string, overwrite: boolean) =>
         plain<{name: string, exists: boolean}>(await Go.ImportConfig(path, overwrite)),
     deleteConfig: (name: string) => Go.DeleteConfig(name),
-    importLegacy: async () =>
-        plain<{imported: string[] | null, skipped: string[] | null, current: string}>(await Go.ImportLegacyFolder()),
     openFolder: (kind: 'configs' | 'logs' | 'data') => Go.OpenFolder(kind),
     setAddon: (id: string, on: boolean) => Go.SetAddon(id, on),
     setProbeTarget: (address: string, port: number) => Go.SetProbeTarget(address, port),

@@ -67,12 +67,12 @@ type Group struct {
 // Together the groups list every process exactly once.
 func DisplayGroups() []Group {
 	return []Group{
-		{Name: "冒险岛与 MapleStory Worlds", Processes: []string{"MapleStory.exe", "msw.exe"}},
+		{Name: "MapleStory", Processes: []string{"MapleStory.exe", "msw.exe"}},
 		{Name: "Nexon 登录器与组件", Processes: []string{"nexon_launcher.exe", "nexon_client.exe", "nexon_runtime.exe",
 			"NexonPlug.exe", "nxsteam.exe", "NGM.exe", "NGM64.exe", "NMService.exe", "SIG.exe"}},
 		{Name: "反作弊", Processes: []string{"BlackCipher64.aes", "BlackCall64.aes", "NGClient64.aes", "NGCLIENT.AES"}},
 		{Name: "崩溃上报", Processes: []string{"UnityCrashHandler64.exe", "CrashReportClient.exe"}},
-		{Name: "私服客户端", Processes: []string{"MapleRoyals.exe", "mr.dll", "MapleLegends.exe", "DreamMS.exe",
+		{Name: "其他客户端", Processes: []string{"MapleRoyals.exe", "mr.dll", "MapleLegends.exe", "DreamMS.exe",
 			"Kaizen v92.exe", "Kaizenv92.exe", "Fantasia.exe"}},
 	}
 }

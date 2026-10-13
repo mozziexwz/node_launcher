@@ -32,9 +32,11 @@ type fakeEngine struct {
 
 func (e *fakeEngine) Addr() *net.TCPAddr           { return e.addr }
 func (e *fakeEngine) Credential() (string, string) { return e.user, e.password }
-func (e *fakeEngine) Stats() engine.Stats          { return engine.Stats{Accepted: 5, Active: 2} }
-func (e *fakeEngine) Close() error                 { e.mu.Lock(); e.closed++; e.mu.Unlock(); return nil }
-func (e *fakeEngine) closeCount() int              { e.mu.Lock(); defer e.mu.Unlock(); return e.closed }
+func (e *fakeEngine) Stats() engine.Stats {
+	return engine.Stats{Accepted: 5, Active: 2, Upload: 3072, Download: 1 << 20, UploadRate: 100, DownloadRate: 2048}
+}
+func (e *fakeEngine) Close() error    { e.mu.Lock(); e.closed++; e.mu.Unlock(); return nil }
+func (e *fakeEngine) closeCount() int { e.mu.Lock(); defer e.mu.Unlock(); return e.closed }
 
 type fakeRedirector struct {
 	mu           sync.Mutex
@@ -229,6 +231,9 @@ func TestStartStopHappyPath(t *testing.T) {
 	st := h.c.Status()
 	if st.State != StateRunning || st.Config != "直连.json" || st.Accepted != 5 || st.Active != 2 || st.Since.IsZero() {
 		t.Fatalf("status %+v", st)
+	}
+	if st.Upload != 3072 || st.Download != 1<<20 || st.UploadRate != 100 || st.DownloadRate != 2048 {
+		t.Fatalf("traffic %+v", st)
 	}
 	calls, _, _ := h.red.snapshot()
 	game := profiles.DefaultMapleStory().ProcessList()

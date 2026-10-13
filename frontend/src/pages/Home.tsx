@@ -1,6 +1,6 @@
 import {useState} from 'react'
 import {api, Check, errorText, Overview} from '../api'
-import {Banner, Card, formatUptime, Spinner, Switch, useClock} from '../components'
+import {Banner, Card, formatBytes, formatUptime, Spinner, Switch, useClock} from '../components'
 
 const stateText = {
     idle: '未加速',
@@ -37,7 +37,7 @@ export function Home(props: {
             if (running) {
                 const game = await api.runningGame()
                 if (game.length > 0 && !await props.confirm('停止加速',
-                    `冒险岛正在运行（${game.join('、')}），停止加速会断开游戏连接。确定停止吗？`, '停止加速', true)) {
+                    `MapleStory 正在运行（${game.join('、')}），停止加速会断开游戏连接。确定停止吗？`, '停止加速', true)) {
                     return
                 }
                 await api.stop()
@@ -97,12 +97,18 @@ export function Home(props: {
                 <div className="hero-state">
                     <div className="hero-label">{stateText[st.state]}</div>
                     <div className="hero-sub">
-                        {st.state === 'running' ? <>已运行 {formatUptime(st.sinceUnix)}　·　当前连接 {st.active}　·　累计 {st.accepted}</>
+                        {st.state === 'running' ? (
+                                <div className="hero-stats">
+                                    <span>已运行 <b>{formatUptime(st.sinceUnix)}</b></span>
+                                    <span>已使用流量 <b>{formatBytes(st.upload + st.download)}</b></span>
+                                    <span>当前速率 <b>↑ {formatBytes(st.uploadRate)}/s</b> <b>↓ {formatBytes(st.downloadRate)}/s</b></span>
+                                </div>
+                            )
                             : st.state === 'starting' ? '正在连接 MSBOOST 节点并加载分流驱动…'
                             : st.state === 'stopping' ? '正在断开连接并卸载分流驱动…'
                             : validConfigs.length === 0 ? <>还没有可用的节点配置，请先<button className="link" onClick={props.goConfigs}>导入配置</button></>
                             : !hasCurrent ? '请先在下方选择节点配置'
-                            : '开始加速后再打开冒险岛'}
+                            : '开始加速后再打开 MapleStory'}
                     </div>
                 </div>
                 <button className={'hero-button ' + (running ? 'stop' : 'start')} disabled={running ? busy : !canStart} onClick={toggle}>
@@ -146,11 +152,11 @@ export function Home(props: {
             }>
                 {checkError && <Banner kind="error">{checkError}</Banner>}
                 {!check && !checkError && (
-                    <p className="muted">查询出口 IP，并分别测量到中转服务器和到游戏服务器的延迟。不需要先开始加速，需要十几秒。</p>
+                    <p className="muted">查询连接到游戏服务器的 IPv4，并检测到中转服务器及到游戏服务器的延迟。不需要先开始加速，需要十几秒。</p>
                 )}
                 {check && (
                     <dl className="check">
-                        <dt>当前出口 IPv4</dt>
+                        <dt>当前到游戏服务器 IPv4</dt>
                         <dd className={check.exitIP ? 'ok' : 'bad'}>{check.exitIP || '查询失败：' + check.exitIPError}</dd>
                         <dt>当前到中转服务器延迟</dt>
                         <dd className={check.entrance.ok ? 'ok' : 'bad'}>

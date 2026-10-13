@@ -14,8 +14,6 @@ export function HideToTray():Promise<void>;
 
 export function ImportConfig(arg1:string,arg2:boolean):Promise<main.ImportResultDTO>;
 
-export function ImportLegacyFolder():Promise<main.LegacyResultDTO>;
-
 export function OpenFolder(arg1:string):Promise<void>;
 
 export function OpenURL(arg1:string):Promise<void>;

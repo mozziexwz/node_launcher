@@ -75,10 +75,10 @@ export function Game(props: {overview: Overview, refresh: () => Promise<void>}) 
                 ))}
             </Card>
 
-            <Card title="全程测速目标">
+            <Card title="游戏测速目标">
                 <p className="muted">
-                    “到游戏服务器延迟”会经节点连接这个地址。请填写游戏服务器的公网 IPv4 和端口，
-                    例如默认的 35.155.204.207:8585；玩 MapleLegends 可以填 51.222.56.192:8484。
+                    请填写测速目标游戏服务器的公网 IPv4 和端口。<br/>
+                    默认 GMS：35.155.204.207:8585
                 </p>
                 {message && <Banner kind={message.kind} onClose={() => setMessage(null)}>{message.text}</Banner>}
                 <div className="target-form">

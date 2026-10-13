@@ -68,7 +68,9 @@ func aboutInfo() AboutDTO {
 		License: "MSBOOST 启动器是自由软件：你可以依据自由软件基金会发布的 GNU 通用公共许可证第 3 版（GPL-3.0）" +
 			"再发布和修改本程序。本程序不提供任何担保。许可全文和所用的开源组件见“开源许可”。",
 		Components: []ComponentDTO{
-			{Name: "mieru", Version: moduleVersion("github.com/enfein/mieru/v3"), Copyright: "Copyright (C) 2021-2026 mieru authors",
+			// Shown by its Japanese name, as the project itself writes it; the
+			// UI never says mieru.
+			{Name: "見える", Version: moduleVersion("github.com/enfein/mieru/v3"), Copyright: "Copyright (C) 2021-2026 見える 作者",
 				License: "GPL-3.0", URL: "https://github.com/enfein/mieru"},
 			{Name: "ProxyBridge", Version: redirectorVersion, Copyright: "Copyright (c) 2025 Anof-cyber/InterceptSuite",
 				License: "MIT", URL: "https://github.com/InterceptSuite/ProxyBridge"},

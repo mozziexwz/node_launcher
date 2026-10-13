@@ -37,6 +37,7 @@ const stateLabel: Record<State, string> = {
 }
 
 const maxLogLines = 1000
+const homepage = 'https://msboost.de/'
 
 // mergeLogs adds lines not seen yet, keeping sequence order and a size cap.
 function mergeLogs(old: LogLine[], lines: LogLine[] | null): LogLine[] {
@@ -164,7 +165,10 @@ export default function App() {
                         </button>
                     ))}
                 </nav>
-                <div className="sidebar-foot">{overview?.version}</div>
+                <div className="sidebar-foot">
+                    <div>{overview?.version}</div>
+                    <button className="link home-link" onClick={() => api.openURL(homepage)}>MSBOOST</button>
+                </div>
             </aside>
 
             <main className="content">

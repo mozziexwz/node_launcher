@@ -69,9 +69,9 @@ func (a *App) startup(ctx context.Context) {
 	a.log.Printf(logx.App, "MSBOOST 启动器已启动，版本 %s，数据目录 %s", versionString(), a.layout.Root)
 }
 
-// pushStatus refreshes connection counts while accelerating.
+// pushStatus refreshes the traffic figures once a second while accelerating.
 func (a *App) pushStatus(ctx context.Context) {
-	t := time.NewTicker(2 * time.Second)
+	t := time.NewTicker(time.Second)
 	defer t.Stop()
 	for {
 		select {
@@ -142,7 +142,7 @@ func (a *App) toggleFromTray() {
 	switch a.ctl.Status().State {
 	case app.StateRunning:
 		if running := a.ctl.RunningGameProcesses(); len(running) > 0 && !a.confirm("停止加速",
-			"冒险岛正在运行，停止加速会断开游戏连接。确定停止吗？") {
+			"MapleStory 正在运行，停止加速会断开游戏连接。确定停止吗？") {
 			return
 		}
 		if err := a.Stop(); err != nil {
@@ -267,30 +267,6 @@ func (a *App) DeleteConfig(name string) error {
 	}
 	a.log.Printf(logx.App, "已删除节点配置 %s", name)
 	return nil
-}
-
-// ImportLegacyFolder imports configurations from the old BAT launcher folder.
-func (a *App) ImportLegacyFolder() (LegacyResultDTO, error) {
-	dir, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{Title: "选择旧版 MSBOOST 启动器所在的文件夹"})
-	if err != nil || dir == "" {
-		return LegacyResultDTO{}, err
-	}
-	result, err := a.layout.ImportLegacy(dir)
-	if err != nil {
-		return LegacyResultDTO{}, err
-	}
-	dto := LegacyResultDTO{Current: result.Current}
-	for _, c := range result.Imported {
-		dto.Imported = append(dto.Imported, c.Name)
-	}
-	for _, c := range result.Skipped {
-		dto.Skipped = append(dto.Skipped, fmt.Sprintf("%s：%v", c.Name, c.Err))
-	}
-	if result.Current != "" && a.ctl.Status().State == app.StateIdle {
-		a.ctl.SelectConfig(result.Current)
-	}
-	a.log.Printf(logx.App, "从旧版导入了 %d 个配置", len(dto.Imported))
-	return dto, nil
 }
 
 // OpenFolder opens configs, logs or the data folder in Explorer.

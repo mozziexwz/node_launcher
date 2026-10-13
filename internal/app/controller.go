@@ -108,15 +108,19 @@ const (
 	StateStopping State = "stopping"
 )
 
-// Status is a snapshot for the UI.
+// Status is a snapshot for the UI. Traffic is with the node, in bytes.
 type Status struct {
-	State     State
-	Config    string
-	Since     time.Time
-	Accepted  int64
-	Active    int64
-	Addons    map[string]bool
-	LastError string
+	State        State
+	Config       string
+	Since        time.Time
+	Accepted     int64
+	Active       int64
+	Upload       int64
+	Download     int64
+	UploadRate   int64 // bytes per second
+	DownloadRate int64
+	Addons       map[string]bool
+	LastError    string
 }
 
 // Errors the UI may want to distinguish.
@@ -192,6 +196,8 @@ func (c *Controller) statusLocked() Status {
 		st.Since = c.session.since
 		stats := c.session.eng.Stats()
 		st.Accepted, st.Active = stats.Accepted, stats.Active
+		st.Upload, st.Download = stats.Upload, stats.Download
+		st.UploadRate, st.DownloadRate = stats.UploadRate, stats.DownloadRate
 	}
 	return st
 }
@@ -480,11 +486,13 @@ func (c *Controller) Stop() error {
 	} else {
 		c.log.Printf(logx.App, "驱动状态：%s", state)
 	}
+	stats := sess.eng.Stats()
 	sess.eng.Close()
 	for _, s := range sess.secrets {
 		c.log.RemoveSecret(s)
 	}
-	c.log.Printf(logx.App, "加速已停止，用时 %v", time.Since(started).Round(time.Millisecond))
+	c.log.Printf(logx.App, "加速已停止，用时 %v；本次已使用流量 %s",
+		time.Since(started).Round(time.Millisecond), FormatBytes(stats.Upload+stats.Download))
 
 	c.mu.Lock()
 	c.state = StateIdle
@@ -597,7 +605,7 @@ func (c *Controller) Check(ctx context.Context) (CheckResult, error) {
 	}
 
 	result.Game = checks.FullPath(proxy, s.ProbeTarget.Address, s.ProbeTarget.Port, probe.FullPathOptions{})
-	c.log.Printf(logx.App, "网络检测：出口 %s；到中转 %s；到游戏 %s",
+	c.log.Printf(logx.App, "网络检测：到游戏服务器 IPv4 %s；到中转 %s；到游戏 %s",
 		orText(result.ExitIP, result.ExitIPError), result.Entrance.Compact(), result.Game.Compact())
 	return result, nil
 }

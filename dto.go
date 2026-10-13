@@ -14,13 +14,15 @@ import (
 // Values sent to the frontend. Times are Unix milliseconds; 0 means unset.
 
 type StatusDTO struct {
-	State     string          `json:"state"` // idle | starting | running | stopping
-	Config    string          `json:"config"`
-	SinceUnix int64           `json:"sinceUnix"`
-	Accepted  int64           `json:"accepted"`
-	Active    int64           `json:"active"`
-	LastError string          `json:"lastError"`
-	Addons    map[string]bool `json:"addons"`
+	State        string          `json:"state"` // idle | starting | running | stopping
+	Config       string          `json:"config"`
+	SinceUnix    int64           `json:"sinceUnix"`
+	Upload       int64           `json:"upload"` // bytes exchanged with the node
+	Download     int64           `json:"download"`
+	UploadRate   int64           `json:"uploadRate"` // bytes per second
+	DownloadRate int64           `json:"downloadRate"`
+	LastError    string          `json:"lastError"`
+	Addons       map[string]bool `json:"addons"`
 }
 
 type ConfigDTO struct {
@@ -85,12 +87,6 @@ type ImportResultDTO struct {
 	Exists bool   `json:"exists"` // a different file with this name is already in configs\
 }
 
-type LegacyResultDTO struct {
-	Imported []string `json:"imported"`
-	Skipped  []string `json:"skipped"`
-	Current  string   `json:"current"`
-}
-
 type LogLineDTO struct {
 	Seq  uint64 `json:"seq"`
 	Time string `json:"time"`
@@ -121,7 +117,8 @@ type AboutDTO struct {
 
 func toStatusDTO(st app.Status) StatusDTO {
 	dto := StatusDTO{
-		State: string(st.State), Config: st.Config, Accepted: st.Accepted, Active: st.Active,
+		State: string(st.State), Config: st.Config,
+		Upload: st.Upload, Download: st.Download, UploadRate: st.UploadRate, DownloadRate: st.DownloadRate,
 		LastError: st.LastError, Addons: st.Addons,
 	}
 	if !st.Since.IsZero() {
