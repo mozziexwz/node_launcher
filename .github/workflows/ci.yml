@@ -44,16 +44,14 @@ jobs:
           MSBOOST_NODE_PROBE: ${{ github.workspace }}\.cache\tcp_probe.py
         run: go test -count=1 ./...
 
-      - name: Build m0spike
-        run: go build -o build/m0/m0spike.exe ./cmd/m0spike
-
-      # M1 acceptance bundle: the CLI next to our patched core and WinDivert.
+      # Command-line tool for development and diagnostics, next to our patched
+      # core and WinDivert.
       - name: Build msboostctl bundle
         shell: pwsh
         run: |
           go build -o build/m1/msboostctl.exe ./cmd/msboostctl
           Copy-Item build/core/* build/m1/
-          Get-ChildItem build/m1 | ForEach-Object { '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash, $_.Name } | Set-Content build/m1/SHA256SUMS.txt
+          (Get-ChildItem build/m1) | ForEach-Object { '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash, $_.Name } | Set-Content build/m1/SHA256SUMS.txt
 
       - uses: actions/upload-artifact@v4
         with:
@@ -70,11 +68,16 @@ jobs:
           go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0
           wails build -clean -m -platform windows/amd64
 
+      # M2 acceptance bundle: the portable launcher next to the same core files.
+      - name: Assemble launcher bundle
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force build/m2 | Out-Null
+          Copy-Item build/bin/MSBOOST-Launcher.exe, build/core/* build/m2/
+          (Get-ChildItem build/m2) | ForEach-Object { '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash, $_.Name } | Set-Content build/m2/SHA256SUMS.txt
+
       - uses: actions/upload-artifact@v4
         with:
-          name: m0-windows-x64
-          path: |
-            build/core/
-            build/m0/m0spike.exe
-            build/bin/MSBOOST-Launcher.exe
+          name: m2-windows-x64
+          path: build/m2/
           if-no-files-found: error

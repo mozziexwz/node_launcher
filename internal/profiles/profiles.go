@@ -57,6 +57,26 @@ func (g Game) ProcessList() string {
 	return strings.Join(g.Processes, ";")
 }
 
+// Group is a labelled slice of the game's processes, for display only.
+type Group struct {
+	Name      string
+	Processes []string
+}
+
+// DisplayGroups splits DefaultMapleStory's processes into labelled groups.
+// Together the groups list every process exactly once.
+func DisplayGroups() []Group {
+	return []Group{
+		{Name: "冒险岛与 MapleStory Worlds", Processes: []string{"MapleStory.exe", "msw.exe"}},
+		{Name: "Nexon 登录器与组件", Processes: []string{"nexon_launcher.exe", "nexon_client.exe", "nexon_runtime.exe",
+			"NexonPlug.exe", "nxsteam.exe", "NGM.exe", "NGM64.exe", "NMService.exe", "SIG.exe"}},
+		{Name: "反作弊", Processes: []string{"BlackCipher64.aes", "BlackCall64.aes", "NGClient64.aes", "NGCLIENT.AES"}},
+		{Name: "崩溃上报", Processes: []string{"UnityCrashHandler64.exe", "CrashReportClient.exe"}},
+		{Name: "私服客户端", Processes: []string{"MapleRoyals.exe", "mr.dll", "MapleLegends.exe", "DreamMS.exe",
+			"Kaizen v92.exe", "Kaizenv92.exe", "Fantasia.exe"}},
+	}
+}
+
 // Addon is an optional app accelerated alongside the game. Like the game's,
 // its process list is fixed: users can only switch an addon on or off.
 type Addon struct {

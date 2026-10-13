@@ -502,7 +502,12 @@ func (c *Controller) Shutdown() {
 }
 
 // Preflight reports elevation and current conflicts without starting anything.
+// Conflicts only matter before a start, and while a session is active our own
+// relay holds the port the check looks for, so none are reported then.
 func (c *Controller) Preflight() (elevated bool, conflicts []Conflict) {
+	if c.Status().State != StateIdle {
+		return c.deps.System.Elevated(), nil
+	}
 	return c.deps.System.Elevated(), c.deps.System.Conflicts()
 }
 

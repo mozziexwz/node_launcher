@@ -24,8 +24,10 @@ const (
 	Redirect Tag = "分流"
 )
 
-// Line is one log entry.
+// Line is one log entry. Seq increases by one per line, so readers can merge
+// Recent with Subscribe without duplicates.
 type Line struct {
+	Seq  uint64
 	Time time.Time
 	Tag  Tag
 	Text string
@@ -54,6 +56,7 @@ type Logger struct {
 	day     string
 	secrets map[string]bool
 	history []Line
+	seq     uint64
 	subs    map[chan Line]bool
 	closed  bool
 }
@@ -172,7 +175,8 @@ func (l *Logger) write(tag Tag, text string) {
 		if part == "" {
 			continue
 		}
-		line := Line{Time: now, Tag: tag, Text: l.mask(part)}
+		l.seq++
+		line := Line{Seq: l.seq, Time: now, Tag: tag, Text: l.mask(part)}
 		l.history = append(l.history, line)
 		if len(l.history) > historySize {
 			l.history = append([]Line(nil), l.history[len(l.history)-historySize:]...)

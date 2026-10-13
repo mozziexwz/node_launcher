@@ -405,6 +405,24 @@ func TestAddonSwitchesLive(t *testing.T) {
 	}
 }
 
+func TestPreflightSkipsConflictsWhileRunning(t *testing.T) {
+	h := newHarness(t, nil)
+	if _, err := h.c.Start(); err != nil {
+		t.Fatal(err)
+	}
+	// Our own relay now holds the port that the conflict check looks for.
+	h.sys.conflicts = []Conflict{{Message: "分流所需的本地端口被占用", Blocking: true}}
+	if _, conflicts := h.c.Preflight(); len(conflicts) != 0 {
+		t.Fatalf("conflicts while running: %v", conflicts)
+	}
+	if err := h.c.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if _, conflicts := h.c.Preflight(); len(conflicts) != 1 {
+		t.Fatalf("conflicts while idle: %v", conflicts)
+	}
+}
+
 func TestStateGuards(t *testing.T) {
 	h := newHarness(t, nil)
 	if err := h.c.Stop(); !errors.Is(err, ErrNotRunning) {

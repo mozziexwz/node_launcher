@@ -5,6 +5,7 @@ package app
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/mozziexwz/node_launcher/internal/engine"
@@ -13,6 +14,19 @@ import (
 	"github.com/mozziexwz/node_launcher/internal/store"
 	"github.com/mozziexwz/node_launcher/internal/winsys"
 )
+
+// The redirector names itself in a few log lines; the UI only says MSBOOST.
+var redirectorMessages = map[string]string{
+	"ProxyBridge started": "分流核心已启动",
+	"ProxyBridge stopped": "分流核心已停止",
+}
+
+func brandRedirectorLine(line string) string {
+	if m, ok := redirectorMessages[line]; ok {
+		return m
+	}
+	return strings.ReplaceAll(line, "ProxyBridge", "分流核心")
+}
 
 // NewWindows builds a controller backed by the real core, the redirector DLL
 // at corePath and the Windows system helpers.
@@ -30,7 +44,7 @@ func NewWindows(layout store.Layout, log *logx.Logger, corePath string) *Control
 			}
 			go func() {
 				for line := range redirector.Logs() {
-					log.Printf(logx.Redirect, "%s", line)
+					log.Printf(logx.Redirect, "%s", brandRedirectorLine(line))
 				}
 			}()
 			return coreAdapter{core}, nil
@@ -100,14 +114,25 @@ func (windowsSystem) Cleanup(exePath string) []string {
 	default:
 		report = append(report, "驱动状态："+state)
 	}
-	for _, name := range redirector.FirewallRuleNames(exePath) {
-		deleted, err := winsys.DeleteFirewallRule(name)
-		switch {
-		case err != nil:
-			report = append(report, err.Error())
-		case deleted:
-			report = append(report, "已删除防火墙规则 "+name)
-		}
+	// Our patched core names its rule "MSBOOST relay <path hash>"; a portable
+	// copy moved between folders leaves one rule per folder, so remove them
+	// all. The official core's name is only removed for this executable.
+	removed, err := winsys.DeleteFirewallRulesWithPrefix(redirector.RulePrefixPatched + " ")
+	if err != nil {
+		report = append(report, err.Error())
+	}
+	for _, name := range removed {
+		report = append(report, "已删除防火墙规则 "+name)
+	}
+	official := redirector.FirewallRuleNames(exePath)[1]
+	deleted, officialErr := winsys.DeleteFirewallRule(official)
+	if officialErr != nil {
+		report = append(report, officialErr.Error())
+	} else if deleted {
+		report = append(report, "已删除防火墙规则 "+official)
+	}
+	if err == nil && officialErr == nil && len(removed) == 0 && !deleted {
+		report = append(report, "没有残留的防火墙规则")
 	}
 	dir := winsys.ProgramDataDir()
 	if _, err := os.Stat(dir); err == nil {

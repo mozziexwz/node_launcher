@@ -43,6 +43,17 @@ func TestConflicts(t *testing.T) {
 	}
 }
 
+func TestParseRuleNames(t *testing.T) {
+	out := "MSBOOST relay 2294d3a7\r\nMSBOOST relay 0badf00d\r\n\r\nWARNING: something else\r\n"
+	got, rest := parseRuleNames(out, "MSBOOST relay ")
+	if strings.Join(got, ",") != "MSBOOST relay 2294d3a7,MSBOOST relay 0badf00d" || rest != "WARNING: something else" {
+		t.Fatalf("got %v, rest %q", got, rest)
+	}
+	if _, err := DeleteFirewallRulesWithPrefix("x' ; Remove-Item *"); err == nil {
+		t.Fatal("a prefix that could break out of the PowerShell string must be refused")
+	}
+}
+
 func TestAcquireInstance(t *testing.T) {
 	name := "msboost-launcher-test-" + strings.ReplaceAll(t.Name(), "/", "-")
 	release, err := AcquireInstance(name)
