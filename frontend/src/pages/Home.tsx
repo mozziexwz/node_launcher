@@ -152,7 +152,7 @@ export function Home(props: {
             }>
                 {checkError && <Banner kind="error">{checkError}</Banner>}
                 {!check && !checkError && (
-                    <p className="muted">查询连接到游戏服务器的 IPv4，并检测到中转服务器及到游戏服务器的延迟。不需要先开始加速，需要十几秒。</p>
+                    <p className="muted">查询连接到游戏服务器的 IPv4，并检测到中转服务器及到游戏服务器的延迟。</p>
                 )}
                 {check && (
                     <dl className="check">
