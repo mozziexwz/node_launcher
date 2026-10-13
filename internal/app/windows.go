@@ -4,7 +4,9 @@ package app
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -29,8 +31,9 @@ func brandRedirectorLine(line string) string {
 }
 
 // NewWindows builds a controller backed by the real core, the redirector DLL
-// at corePath and the Windows system helpers.
-func NewWindows(layout store.Layout, log *logx.Logger, corePath string) *Controller {
+// at corePath and the Windows system helpers. prepareRuntime, if not nil,
+// checks the redirector's files before every start (release builds).
+func NewWindows(layout store.Layout, log *logx.Logger, corePath string, prepareRuntime func() (func(), error)) *Controller {
 	return New(Deps{
 		Layout: layout,
 		Log:    log,
@@ -49,7 +52,8 @@ func NewWindows(layout store.Layout, log *logx.Logger, corePath string) *Control
 			}()
 			return coreAdapter{core}, nil
 		},
-		System: windowsSystem{},
+		PrepareRuntime: prepareRuntime,
+		System:         windowsSystem{},
 	})
 }
 
@@ -136,11 +140,40 @@ func (windowsSystem) Cleanup(exePath string) []string {
 	}
 	dir := winsys.ProgramDataDir()
 	if _, err := os.Stat(dir); err == nil {
-		if err := os.RemoveAll(dir); err != nil {
-			report = append(report, fmt.Sprintf("删除 %s 失败：%v", dir, err))
-		} else {
+		if err := os.RemoveAll(dir); err == nil {
 			report = append(report, "已删除 "+dir)
+		} else if left, serr := deleteOnReboot(dir); serr == nil {
+			// The DLLs stay loaded until the program exits.
+			report = append(report, fmt.Sprintf("%s 中有 %d 个运行文件正在使用，已安排在下次重启电脑时删除", dir, left))
+		} else {
+			report = append(report, fmt.Sprintf("删除 %s 失败：%v", dir, err))
 		}
 	}
 	return report
+}
+
+// deleteOnReboot schedules everything left under dir, files before their
+// folders, for deletion at the next restart and returns how many files.
+func deleteOnReboot(dir string) (files int, err error) {
+	var paths []string
+	err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		paths = append(paths, path)
+		if !d.IsDir() {
+			files++
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	// WalkDir lists a folder before its contents; delete in reverse.
+	for i := len(paths) - 1; i >= 0; i-- {
+		if err := winsys.DeleteOnReboot(paths[i]); err != nil {
+			return 0, err
+		}
+	}
+	return files, nil
 }

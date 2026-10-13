@@ -94,6 +94,9 @@ type Deps struct {
 	Log            *logx.Logger
 	StartEngine    func(*engine.Config) (CoreEngine, error)
 	LoadRedirector func() (Redirector, error) // called once, on first start
+	// PrepareRuntime, when set, checks the redirector's files before every
+	// start and keeps them locked until release is called after the start.
+	PrepareRuntime func() (release func(), err error)
 	System         System
 	Checks         CheckFuncs
 }
@@ -366,6 +369,14 @@ func (c *Controller) startSession(s store.Settings) (sess *session, warnings []s
 	}
 	if s.CurrentConfig == "" {
 		return nil, nil, ErrNoConfig
+	}
+	if prepare := c.deps.PrepareRuntime; prepare != nil {
+		release, err := prepare()
+		if err != nil {
+			return nil, nil, fmt.Errorf("分流组件检查失败：%w", err)
+		}
+		// Held until the DLL is loaded and the driver has started.
+		defer release()
 	}
 	cfg, err := c.deps.Layout.LoadConfig(s.CurrentConfig)
 	if err != nil {

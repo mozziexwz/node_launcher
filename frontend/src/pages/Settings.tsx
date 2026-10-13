@@ -129,6 +129,7 @@ function Licenses(props: {about: About, onClose: () => void}) {
                     <button key={l.name} className="link" onClick={() => api.openURL(l.url)}>{l.name}</button>
                 ))}
             </div>
+            <p className="muted small license-file">完整的版权与许可声明见程序包中的 THIRD_PARTY_NOTICES.txt。</p>
         </Modal>
     )
 }

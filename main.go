@@ -1,8 +1,9 @@
 // Command MSBOOST-Launcher is the MSBOOST desktop launcher (Wails v2).
 //
 // It is portable: configs\, logs\, data\ and settings.json live beside the
-// executable. Until M3 bundles the runtime files, ProxyBridgeCore.dll,
-// WinDivert.dll and WinDivert64.sys are loaded from the same folder.
+// executable. Release builds embed ProxyBridgeCore.dll, WinDivert.dll and
+// WinDivert64.sys and release them to %ProgramData%\MSBOOST (runtime.go);
+// development builds load them from beside the executable.
 package main
 
 import (
@@ -46,7 +47,11 @@ func main() {
 		fatal("无法创建日志：" + err.Error())
 	}
 
-	a := NewApp(layout, log, filepath.Join(layout.Root, "ProxyBridgeCore.dll"), exe)
+	rt, err := loadRuntime(layout, log)
+	if err != nil {
+		fatal(err.Error())
+	}
+	a := NewApp(layout, log, rt, exe)
 	err = wails.Run(&options.App{
 		Title:            "MSBOOST 启动器",
 		Width:            1040,

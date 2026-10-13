@@ -97,7 +97,8 @@ func setup(fs *flag.FlagSet, args []string) (*env, []string, error) {
 			fmt.Printf("%s [%s] %s\n", line.Time.Format("15:04:05"), line.Tag, line.Text)
 		}
 	}()
-	e := &env{layout: layout, log: log, ctl: app.NewWindows(layout, log, *corePath)}
+	// The CLI is a development tool: it loads the runtime files from -core.
+	e := &env{layout: layout, log: log, ctl: app.NewWindows(layout, log, *corePath, nil)}
 	e.stop = func() {
 		cancel()
 		<-done

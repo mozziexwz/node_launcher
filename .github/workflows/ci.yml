@@ -27,8 +27,11 @@ jobs:
         with:
           go-version: '1.27.1'
 
+      # Release builds embed build/core (-tags bundle); vet that file set too.
       - name: Vet
-        run: go vet ./...
+        run: |
+          go vet ./...
+          go vet -tags bundle .
 
       # Node-side v2 probe for the contract test, pinned to mozziexwz/node v2.3.0.
       - name: Fetch node-side tcp_probe.py
@@ -55,7 +58,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: m1-windows-x64
+          name: msboostctl-windows-x64
           path: build/m1/
           if-no-files-found: error
 
@@ -63,24 +66,65 @@ jobs:
         with:
           node-version: '24'
 
-      # Wails builds with -buildvcs=false, so the commit goes into the version.
-      - name: Build launcher UI (Wails)
+      # The release build embeds the runtime files (-tags bundle). Wails builds
+      # with -buildvcs=false, so the version carries the tag or the commit.
+      - name: Build launcher (Wails)
         shell: pwsh
         run: |
           go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0
-          $version = 'dev-' + $env:GITHUB_SHA.Substring(0, 7)
-          wails build -clean -m -platform windows/amd64 -ldflags "-X main.version=$version"
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $version = $env:GITHUB_REF_NAME
+            $cfg = Get-Content wails.json -Raw | ConvertFrom-Json
+            $cfg.info.productVersion = $version.TrimStart('v')
+            $cfg | ConvertTo-Json -Depth 10 | Set-Content wails.json -Encoding utf8
+          } else {
+            $version = 'dev-' + $env:GITHUB_SHA.Substring(0, 7)
+          }
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          wails build -clean -m -platform windows/amd64 -tags bundle -ldflags "-X main.version=$version"
 
-      # M2 acceptance bundle: the portable launcher next to the same core files.
-      - name: Assemble launcher bundle
+      # The portable release: one exe plus the license files.
+      - name: Assemble release folder
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force build/m2 | Out-Null
-          Copy-Item build/bin/MSBOOST-Launcher.exe, build/core/* build/m2/
-          (Get-ChildItem build/m2) | ForEach-Object { '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash, $_.Name } | Set-Content build/m2/SHA256SUMS.txt
+          $dir = 'build/release'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          go run ./scripts/notices -o "$dir/THIRD_PARTY_NOTICES.txt"
+          if ($LASTEXITCODE -ne 0) { throw 'notices failed' }
+          Copy-Item build/bin/MSBOOST-Launcher.exe $dir/
+          Copy-Item LICENSE "$dir/LICENSE.txt"
+          (Get-ChildItem $dir -File) | ForEach-Object { '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash, $_.Name } | Set-Content "$dir/SHA256SUMS.txt"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: m2-windows-x64
-          path: build/m2/
+          name: MSBOOST-Launcher-${{ env.VERSION }}-windows-x64
+          path: build/release/
           if-no-files-found: error
+
+  # A v* tag produces a draft release with the zip; it is published by hand.
+  release:
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: MSBOOST-Launcher-${{ github.ref_name }}-windows-x64
+          path: package
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          name="MSBOOST-Launcher-${GITHUB_REF_NAME}-windows-x64"
+          (cd package && zip -9 -r "../${name}.zip" .)
+          sha256sum "${name}.zip" > "${name}.zip.sha256"
+          # docs/releases/<tag>.md if written, otherwise the template.
+          notes="docs/releases/${GITHUB_REF_NAME}.md"
+          [ -f "$notes" ] || notes=docs/release-notes-template.md
+          sed "s/{{VERSION}}/${GITHUB_REF_NAME}/g" "$notes" > notes.md
+          gh release create "$GITHUB_REF_NAME" "${name}.zip" "${name}.zip.sha256" --draft --verify-tag --title "MSBOOST 启动器 ${GITHUB_REF_NAME}" --notes-file notes.md
