@@ -1,13 +1,13 @@
 # MSBOOST 一体化启动器开发规划
 
 > 仓库：<https://github.com/mozziexwz/node_launcher>
-> 日期：2026-10-12　状态：规划已确认（2026-10-12），M0 进行中。
+> 日期：2026-10-12（2026-10-13 更新）　状态：M0 已完成（`docs/m0/README.md`）；M1 已完成并通过真实游戏验收（`docs/m1/README.md`），下一步 M2 界面。
 >
 > 依据：
 > - `legacy/MSBOOST启动器_全程TCP测速.bat`，以及 `docs/MSBOOST全程TCP测速整改计划.md`
 > - 用户实测通过的 ProxyBridge 配置 `MapleStory.pbprofile`（进程清单与协议见 §4.3）
 > - [ProxyBridge](https://github.com/InterceptSuite/ProxyBridge) v4.1.0 源码（commit `c9646aa`）
-> - [mieru](https://github.com/enfein/mieru) v3.38.0 源码
+> - [mieru](https://github.com/enfein/mieru) v3.38.1 源码（2026-10-13 起；M0 前期用 v3.38.0）
 > - 用户实测：ProxyBridge + MSBOOST.exe 代理冒险岛，登录、进频道、换频道均正常，反作弊无报错、无掉线，兼容性优于 Netch
 
 ## 1. 目标与范围
@@ -24,14 +24,27 @@
 ### 1.2 首版必须做到
 
 1. 带界面的 Windows 程序，内置 mieru 客户端和按进程分流，不再依赖 MSBOOST.exe、Netch、Proxifier。
-2. 只代理冒险岛相关进程的 TCP 和 UDP（默认进程清单见 §4.3，可配置），其他程序一律直连。
+2. 只代理冒险岛相关进程的 TCP 和 UDP，其他程序一律直连。
+   - 进程清单固定（§4.3），用户不能修改；
+   - Discord、Steam 各有一个开关，可以一并加速，默认关闭。
 3. 不改系统路由表、DNS、系统代理，也不装虚拟网卡。停止加速或程序异常退出后，网络立即恢复。
-4. 覆盖旧 BAT 的全部功能：加载配置、启动/停止、出口 IPv4、到中转延迟、全程游戏延迟（v2 协议）。
-5. 开源（GPL-3.0），CI 可复现构建，提供安装包。
+4. 覆盖旧 BAT 的全部功能：加载配置、启动/停止、出口 IPv4、到中转延迟、全程游戏延迟（v2 协议）。测速目标可以在设置中修改。
+5. 开源（GPL-3.0），CI 可复现构建，以便携版发布。
 
-### 1.3 首版不做
+### 1.3 不做
 
-- 服务模式（免每次 UAC）、自动更新、面板账号登录后拉取配置：列入 M5。
+已确认不做（2026-10-13）：
+
+- 用户自定义加速进程。只提供 Discord、Steam 两个开关。
+- 代码签名。
+- 面板账号登录、拉取配置。
+- `mieru://` 链接导入。配置沿用现有流程：用户在网站下载配置文件，启动器读取。
+- 安装包，首选便携版。
+
+首版不做，列入 M5：服务模式（免每次 UAC）、自动更新。
+
+另外：
+
 - ARM64 Windows、Windows 7/8.1。
 - 节点端任何改动。全程测速继续依赖主项目 v2.3.0 起随部署安装的 v2 测速服务。
 
@@ -39,14 +52,21 @@
 
 - **只碰冒险岛**：规则只匹配游戏进程。本程序自身流量（mieru 连节点、测速）始终直连，ProxyBridge 会按 PID 放行加载它的进程。
 - **失败可回退**：启动时任一步失败，就逆序回滚，不留半开状态。
-- **不留残留**：停止时关闭 WinDivert 句柄，并尝试停止驱动服务；卸载时清理驱动服务和防火墙规则。
+- **不留残留**：停止时关闭 WinDivert 句柄，并尝试停止驱动服务。设置页的“清理”功能会删除驱动服务、防火墙规则和释放出来的运行文件。
 - **计时诚实**：沿用整改计划的测速口径，不叠加、不补零、不写死修正量。
+- **界面只显示 MSBOOST**：
+  - 窗口、托盘、对话框、提示和错误信息统一使用“MSBOOST”，例如“MSBOOST 节点配置”“MSBOOST 核心”；
+  - 日志里组件统一称为“核心”“分流”，不出现 mieru、ProxyBridge 等组件名；
+  - 组件名只出现在“关于”页的开源许可声明里。这是 GPL-3.0 的要求：交互界面要展示许可信息，并保留上游版权声明。
 
 ## 2. 规划依据（已核实的事实）
 
 ### 2.1 MSBOOST.exe 与 mieru
 
 - MSBOOST.exe 就是 mieru 官方客户端 3.38.0（`MSBOOST.exe version` 的输出），许可为 GPL-3.0。
+- 新程序嵌入的是 **3.38.1**。这一版修复了 SOCKS5 认证漏洞：
+  - 3.38.0 的服务端在客户端同时提出“无认证”和“用户名密码”两种方式时，会放行“无认证”，本机任何程序都能绕过会话凭据（D3）。
+  - 回归测试 `TestEngineNeverFallsBackToNoAuth` 已锁住这一点：它在 3.38.0 上失败，在 3.38.1 上通过。
 - mieru 提供可嵌入的 Go 接口 `apis/client`：`NewClient`、`Store`、`Start`、`Stop`、`DialContext`。其中 `Store` 只接受单个 profile，实例 `Stop` 后不能复用。
 - `mieru run` 的内部装配分两步：先用 `appctlcommon.NewClientMuxFromProfile` 建立多路复用，再用 `pkg/socks5` 的 `socks5.New` 在本地起 SOCKS5。这个 SOCKS5 支持入站用户名密码；`HANDSHAKE_NO_WAIT` 模式下会提前回复 SOCKS5 成功。
 - 新程序在进程内复用这套装配，和 MSBOOST.exe 走的是同一条代码路径。
@@ -62,7 +82,7 @@
 | 回调线程 | 连接回调在包处理线程上**同步**调用，而且每条新连接都会触发，不只是命中规则的连接 | Go 回调必须非阻塞；默认不注册连接回调 |
 | 自身流量 | 加载 DLL 的进程，其流量按 PID 一律直连 | mieru 跑在本进程内，不会形成回环 |
 | 中继端口 | TCP 34010，UDP 34011 | 与已经在运行的 ProxyBridge 冲突，需要检测 |
-| 防火墙 | `Start` 时用 netsh 为宿主 exe 添加入站放行规则，规则名为 `ProxyBridge relay <路径哈希>`；核心代码只添加，不删除 | 改名，并由卸载程序清理（补丁 P1） |
+| 防火墙 | `Start` 时用 netsh 为宿主 exe 添加入站放行规则，规则名为 `ProxyBridge relay <路径哈希>`；核心代码只添加，不删除 | 改名，并由“清理”功能删除（补丁 P1） |
 | 驱动 | `Stop` 只关闭句柄，不卸载 WinDivert 驱动；官方卸载程序会执行 `sc stop WinDivert` | 我们在停止加速时主动停止驱动服务 |
 | 进程名匹配 | 不区分大小写，支持通配符，例如 `MapleStory*.exe` | 私服改了名的客户端可以用通配符匹配 |
 
@@ -115,7 +135,7 @@ MapleStory.exe ──TCP──▶ [WinDivert 驱动] ──改写──▶ Proxy
 | 编号 | 决策 | 理由 | 备选或触发条件 |
 |---|---|---|---|
 | D1 | Go + Wails v2 + React/TS | mieru 是 Go 写的，可以进程内嵌入；前端与主项目同一技术栈 | Wails v3 目前还是 beta，转正后再评估（v3 自带托盘） |
-| D2 | 进程内嵌入 mieru 3.38.0，不再调用 MSBOOST.exe | 一个进程一个生命周期；不在用户目录留下 mieru 配置库；没有后台残留进程和 RPC 端口；端口与凭据由程序自己掌控 | 若 M0 嵌入失败，改为托管子进程：设置 `MIERU_CONFIG_JSON_FILE` 后运行 `MSBOOST.exe run` |
+| D2 | 进程内嵌入 mieru 3.38.1，不再调用 MSBOOST.exe | 一个进程一个生命周期；不在用户目录留下 mieru 配置库；没有后台残留进程和 RPC 端口；端口与凭据由程序自己掌控 | 若 M0 嵌入失败，改为托管子进程：设置 `MIERU_CONFIG_JSON_FILE` 后运行 `MSBOOST.exe run` |
 | D3 | 本地 SOCKS5 只监听 127.0.0.1，用随机端口，每次启动生成随机用户名和密码 | 避免端口冲突；防止本机其他程序借用用户的节点 | — |
 | D4 | ProxyBridge 用 v4.1.0 源码加少量补丁，在 CI 中编译成 DLL，由 Go 直接调用 | 复用你实测通过的核心；补丁小，便于审阅 | — |
 | D5 | 首版整个程序以管理员运行（manifest 设为 `requireAdministrator`） | 最简单，与 Netch 一致 | M5 改为服务模式，免去每次 UAC |
@@ -124,13 +144,16 @@ MapleStory.exe ──TCP──▶ [WinDivert 驱动] ──改写──▶ Proxy
 | D8 | 许可证用 GPL-3.0 | mieru 是 GPL-3.0；ProxyBridge（MIT）和 WinDivert（LGPL-3.0）都与之兼容 | — |
 | D9 | 程序文件名 `MSBOOST-Launcher.exe`，窗口标题“MSBOOST 启动器” | 不和旧的 MSBOOST.exe（mieru）重名 | 已确认 |
 | D10 | 首版必须有托盘图标：Wails v2 + `fyne.io/systray`（Apache-2.0） | 用户要求；Wails v2 没有原生托盘 | M0 验证它与 Wails 消息循环能否共存；不行就自己用 `Shell_NotifyIcon` 实现，或改用 Wails v3 |
+| D11 | 便携版：只有一个 `MSBOOST-Launcher.exe`；用户数据放在 exe 同目录 | 用户首选便携版；不需要安装和卸载 | 见 §6 M3 |
+| D12 | 界面只显示 MSBOOST（§1.4） | 用户要求 | 组件名只出现在“关于”页 |
 
 ## 4. 功能规格
 
 ### 4.1 主页（加速）
 
 - 一个主按钮：开始加速 / 停止加速。旁边显示当前节点配置名、加速对象（进程名）和运行时长。
-- 三个状态灯：节点（mieru）、分流（ProxyBridge/WinDivert）、测速服务（v2 hello，可选）。
+- 三个状态灯：节点（MSBOOST 核心）、分流、测速服务（v2 hello，可选）。
+- Discord、Steam 两个开关（默认关闭），见 §4.3。
 - “网络检测”卡片显示出口 IPv4、到中转延迟、到游戏延迟。只在用户点“检测”时才运行，不做后台定时测速。
 - 显示当前经过加速的冒险岛连接数，数据来自本地 SOCKS5 入口的计数。
 - 开始加速时，如果冒险岛已经在运行，提示“已建立的连接不会被加速，请重启游戏”。
@@ -138,13 +161,16 @@ MapleStory.exe ──TCP──▶ [WinDivert 驱动] ──改写──▶ Proxy
 
 ### 4.2 节点配置
 
-- **导入**：通过文件选择框选择 mieru 客户端 JSON，格式与 MSBOOST.exe `replace config` 相同（例如 `直连.json`）。解析和校验复用 mieru 自身的逻辑，失败时显示具体原因。
+- **来源**：沿用现有流程，用户在网站下载配置文件（例如 `直连.json`、`日本中转.json`），格式与旧 MSBOOST.exe `replace config` 相同。不做 `mieru://` 链接导入，也不对接面板账号。
+- **读取方式**：
+  - 程序读取 exe 同目录 `configs\` 文件夹里的 `*.json`，与旧 BAT 读取同目录配置的习惯一致；
+  - 也可以在界面上点“导入配置”，选择文件后复制到 `configs\`；
   - 管理员程序收不到从资源管理器拖进来的文件（Windows 的 UIPI 限制），所以不提供拖放导入。
-- **列表**：显示名称、服务器地址、TCP 端口、传输协议，不显示密码。可以设为当前、重命名、删除。
+- **校验**：解析和校验复用核心自身的逻辑，失败时用 MSBOOST 的说法显示具体原因。
+- **列表**：显示名称、服务器地址、TCP 端口，不显示密码。可以设为当前、删除。
 - 运行中禁止切换配置，与 BAT 一致。
-- 下列字段改由程序自己管理，导入时会忽略，并在界面上提示一次：`socks5Port`、`socks5Authentication`、`httpProxyPort`、`rpcPort`。
-- **存储**：在 `%LOCALAPPDATA%\MSBOOST\profiles\` 保存原样副本。副本里有节点密码，安全性依赖用户目录的权限。
-  - 如果标准用户用另一个管理员账号提权，数据会写到那个管理员的用户目录下。这一点写进常见问题。
+- 下列字段改由程序自己管理，读取时忽略：`socks5Port`、`socks5Authentication`、`httpProxyPort`、`rpcPort`。
+- 配置文件里有节点密码。便携版的数据放在 exe 同目录，建议放在用户自己的文件夹，不要放进多人共用的目录。
 
 ### 4.3 游戏设置
 
@@ -155,10 +181,15 @@ MapleStory.exe ──TCP──▶ [WinDivert 驱动] ──改写──▶ Proxy
   - 崩溃上报：`UnityCrashHandler64.exe`、`CrashReportClient.exe`
   - 私服客户端：`MapleRoyals.exe`、`mr.dll`、`MapleLegends.exe`、`DreamMS.exe`、`Kaizen v92.exe`、`Kaizenv92.exe`、`Fantasia.exe`
 
-  用户可以增删。用“浏览”选择 exe 时自动取文件名，也可以直接写通配符。ProxyBridge 核心支持用分号分隔的进程清单，匹配不区分大小写。
+  清单固定在程序里（`internal/profiles`），**用户不能修改**；需要调整时随新版本发布。分流核心按分号分隔的清单匹配进程名，不区分大小写。
+- **可选加速**：两个开关，默认关闭。
+  - **Discord**：`Discord.exe`、`DiscordPTB.exe`、`DiscordCanary.exe`。语音走 UDP，也会一并加速。
+  - **Steam**：`steam.exe`、`steamwebhelper.exe`。开关旁提示“Steam 下载也会经过节点，会消耗节点流量”。
+
+  每个开关对应一条独立规则，可在加速中切换：只对之后新建的连接生效，已有连接要重连。M2 验证这一点。
 - **协议**：TCP + UDP；目标主机、端口、域名都是“全部”；SOCKS5 发送域名（SendDomainToProxy）开启。均与实测配置一致。
-- **测速目标**：IPv4 加端口，默认 `35.155.204.207:8585`。校验规则与 v2 合同一致：必须是规范的公网 IPv4，端口在 1–65535。
-- 预留“游戏方案”结构（名称、进程、测速目标），以后可以加 MSEA、KMS、私服等预设。
+  - 发送域名时由节点解析，节点端规则 `msboost-filter`（GFW 规则集）会拒绝其中的域名。M0 长时间测试中只出现过 1 次（`g.nexonstatic.com`），游戏不受影响。
+- **测速目标**：在设置中可以自定义 IPv4 和端口，默认 `35.155.204.207:8585`。例如玩 MapleLegends 时可以改成它的服务器地址。校验规则与 v2 合同一致：必须是规范的公网 IPv4，端口在 1–65535。
 
 ### 4.4 网络检测（移植自 BAT 的 [3]）
 
@@ -175,12 +206,14 @@ MapleStory.exe ──TCP──▶ [WinDivert 驱动] ──改写──▶ Proxy
 
 ### 4.5 日志与诊断
 
-- 日志放在 `%LOCALAPPDATA%\MSBOOST\logs\`，按天滚动，保留 7 天。
-  - mieru、ProxyBridge 和程序本身的日志分别打标签。
+- 日志放在 exe 同目录的 `logs\`，按天滚动，保留 7 天。
+  - 核心、分流和程序本身的日志分别打上 `[核心]`、`[分流]`、`[程序]` 标签。
   - 写盘前去掉节点密码和会话凭据。
 - 诊断页显示：
   - 最近的错误；
-  - 组件版本：启动器、mieru 3.38.0、ProxyBridge 4.1.0、WinDivert 2.2.2；
+  - 版本：启动器版本，以及核心、分流组件的版本号。组件名只在“关于”页出现；
+  - “连接监视”开关：打开时临时注册连接回调，只显示冒险岛进程的连接。
+- “关于”页：许可信息（GPL-3.0、无担保声明），以及开源组件与许可（mieru、ProxyBridge、WinDivert、Wails 等）。
   - “连接监视”开关：打开时临时注册连接回调，只显示冒险岛进程的连接。
 - “导出诊断包”：把日志和去敏后的设置打成 zip，方便用户反馈问题。
 
@@ -199,7 +232,7 @@ MapleStory.exe ──TCP──▶ [WinDivert 驱动] ──改写──▶ Proxy
    2. 关闭流量日志；
    3. `SetLocalhostViaProxy(FALSE)`；
    4. `AddProxyConfig(SOCKS5, 127.0.0.1, 端口, 用户名, 密码, 发送域名=TRUE)`；
-   5. 调用一次 `AddRule(进程清单（分号分隔）, "*", "*", "", BOTH, PROXY, 配置)`；
+   5. 调用一次 `AddRule(冒险岛进程清单（分号分隔）, "*", "*", "", BOTH, PROXY, 配置)`；每个打开的可选加速（Discord、Steam）再各加一条规则；
    6. `Start()`。
 5. 进入“加速中”。后台查询一次出口 IP，作为连通性提示；查询失败只警告，不自动停止。
 
@@ -246,7 +279,7 @@ node_launcher/
 │  ├─ patches/      对 ProxyBridge 的补丁，附说明 PATCHES.md
 │  └─ windivert.sha256
 ├─ scripts/         build-core.ps1、fetch-windivert.ps1、package.ps1
-├─ build/windows/   图标、manifest（requireAdministrator）、版本信息、NSIS 模板
+├─ build/windows/   图标、manifest（requireAdministrator）、版本信息
 ├─ testdata/        节点端 tcp_probe.py 的固定副本（注明来源提交）、示例配置（假凭据）
 ├─ cmd/m0spike/     M0 验证工具（命令行），M1 后由正式入口取代
 ├─ legacy/          旧 BAT 和 PowerShell 测试，仅供移植参考，不参与构建
@@ -314,28 +347,34 @@ node_launcher/
 - 托盘：Wails v2 没有原生托盘，需要评估第三方库；不稳定的话首版不做，只最小化到任务栏。
 - 退出标准：BAT 的每个功能在界面上都有对应项；中文文案审阅完成。
 
-### M3 打包与发布
+### M3 打包与发布（便携版）
 
 - GitHub Actions（Windows 托管 runner）依次执行：
   1. 下载并校验 WinDivert；
   2. 用 MSVC 编译 ProxyBridgeCore.dll；
   3. `go vet`、`go test`；
   4. 前端构建与测试；
-  5. `wails build -nsis`；
-  6. 打包。
-- 产物：
-  - 安装包：基于 Wails 自带的 NSIS 模板，装到 `Program Files`，带 WebView2 引导安装；
-  - 便携版 zip；
-  - `SHA256SUMS`。
-- 卸载流程：
-  1. 停止程序；
-  2. 停止并删除 WinDivert 驱动服务（没有被其他软件占用时）；
-  3. 删除本程序的防火墙规则；
-  4. 删除程序文件；
-  5. 用户数据先询问，再决定是否删除。
+  5. `wails build`；
+  6. 打成 zip。
+- **产物**：
+  - 一个 `MSBOOST-Launcher.exe`，内嵌 `ProxyBridgeCore.dll`、`WinDivert.dll`、`WinDivert64.sys`；
+  - 外加 `SHA256SUMS`，一起打成 zip。不做安装包。
+- **运行文件释放**：
+  - 程序以管理员身份启动时，把内嵌的三个文件释放到 `%ProgramData%\MSBOOST\runtime\<版本哈希>\`。这个目录只允许管理员和 SYSTEM 写入。
+  - 每次启动都校验 SHA-256，不一致就重新释放，然后从这里加载 DLL。
+  - 原因：便携 exe 常放在“下载”这类普通用户可写的目录。如果 DLL 和 exe 放在一起，可能被替换后以管理员身份加载。
+- **用户数据**：放在 exe 同目录，包括 `configs\`（节点配置）、`logs\`、`settings.json`、`data\`（界面缓存）。
+- **清理**：便携版没有卸载程序，设置页提供“清理”功能：
+  1. 停止并删除 WinDivert 驱动服务（没有被其他软件占用时）；
+  2. 删除本程序的防火墙规则；
+  3. 删除 `%ProgramData%\MSBOOST\`。
+
+  之后删掉 exe 所在的文件夹即可。
+- **不做代码签名（已确认）**：发布说明中写明两点：
+  - SmartScreen 拦截时点“更多信息 → 仍要运行”；
+  - 杀毒软件误报时怎么处理：加白名单，或向厂商提交误报。
 - 补齐 THIRD_PARTY_NOTICES、关于页的许可信息、发布说明模板。
-- 代码签名：首版可以不签。建议申请 SignPath 面向开源项目的免费签名，或者购买证书，以减少 SmartScreen 拦截和杀软误报。
-- 退出标准：在干净的虚拟机上，从安装、使用到卸载全程无残留（§7.4）。
+- 退出标准：在干净的虚拟机上解压即用；执行“清理”后没有残留（§7.4）。
 
 ### M4 验收与小范围试用
 
@@ -345,10 +384,10 @@ node_launcher/
 ### M5 后续（不在首版）
 
 - 服务模式：由常驻服务持有驱动，界面不再需要管理员权限（参考 ProxyBridge 的 `ProxyBridgeSvc` 设计）。
-- 对接主项目面板：会员登录后自动获取节点配置。需要先和主项目约定接口。
-- 自动更新、更多游戏方案预设、`mieru://` 链接导入。
-- 低影响模式：按游戏端口收窄 WinDivert 过滤器，是补丁 P2 的进一步版本，视 M0 的性能数据决定。
-- 如果实测需要，再加 UDP 代理。
+- 自动更新（待定）。
+- 低影响模式：按游戏端口收窄 WinDivert 过滤器，是补丁 P2 的进一步版本，视性能数据决定。
+
+已确认不做：面板对接、`mieru://` 链接导入、代码签名、用户自定义进程（§1.3）。
 
 ## 7. 测试与验收
 
@@ -393,7 +432,7 @@ node_launcher/
   - 建议目标：下载速度下降不超过 5%，连接耗时增加不超过 1 ms。
   - 达不到目标时，启用补丁 P2 后复测。
 - [ ] 停止加速后与安装前对比：`route print`、DNS 设置、系统代理、`netsh winhttp show proxy` 都没有变化；WinDivert 已停止；没有残留进程。
-- [ ] 卸载后：没有 WinDivert 驱动服务（未被其他软件使用时）、没有本程序的防火墙规则、没有程序文件。
+- [ ] 执行“清理”并删除程序文件夹后：没有 WinDivert 驱动服务（未被其他软件使用时）、没有本程序的防火墙规则、没有 `%ProgramData%\MSBOOST\`。
 
 ### 7.5 兼容性矩阵
 
@@ -409,14 +448,14 @@ node_launcher/
 
 - **固定版本**：
   - Go 1.27.x（与主项目一致）、Node 24；
-  - Wails v2，具体版本在 M0 锁定；
-  - mieru v3.38.0、ProxyBridge v4.1.0（`c9646aa`）；
+  - Wails v2.16.0（M0 锁定）、`fyne.io/systray` v1.12.2；
+  - mieru v3.38.1、ProxyBridge v4.1.0（`c9646aa`）；
   - WinDivert 2.2.2-A，SHA-256 见 §2.3。
 - **升级 mieru**：先跑契约测试，再用真实节点验证与节点端 mihomo 的兼容性。
 - **升级 ProxyBridge**：重新应用补丁，再跑 §7.2 的集成测试。
 - **安全**：
-  - 只从安装目录按绝对路径加载 DLL（用 `LoadLibraryEx` 并限定搜索目录），防止 DLL 劫持。
-  - 推荐安装到 `Program Files`。便携版如果放在普通用户可写的目录，DLL 有被替换的风险，界面中要提示。
+  - DLL 只从受保护的释放目录 `%ProgramData%\MSBOOST\runtime\` 按绝对路径加载（用 `LoadLibraryEx` 并限定搜索目录），加载前校验 SHA-256，防止 DLL 劫持（M3）。
+  - 便携 exe 本身可以放在任何位置。
 - **许可**：
   - 本仓库使用 GPL-3.0。
   - THIRD_PARTY_NOTICES 列出：mieru（GPL-3.0）、ProxyBridge（MIT，保留其版权声明）、WinDivert（LGPL-3.0）、Wails（MIT），以及前端依赖。
@@ -436,13 +475,13 @@ node_launcher/
 
 | 风险 | 影响 | 应对 |
 |---|---|---|
-| 杀毒软件误报 WinDivert 或未签名的 exe | 程序无法启动，或文件被隔离 | 做代码签名；向火绒、360、微软提交误报申诉；启动自检时给出加白名单的指引 |
+| 杀毒软件误报 WinDivert 或未签名的 exe | 程序无法启动，或文件被隔离 | 不做代码签名（已确认）；向火绒、360、微软提交误报申诉；发布说明和启动自检给出加白名单的指引 |
 | 冒险岛反作弊以后拦截 WinDivert | 无法加速 | 关注试用反馈；备选方案为 NetFilter SDK 商业授权，或 mihomo TUN 路由模式 |
 | WinDivert 驱动停止失败（被其他软件占用） | 其他游戏的反作弊可能检测到它 | 停止加速时尝试卸载；在常见问题中说明“重启电脑即可清除” |
 | 截获全机流量带来性能损耗 | 影响其他软件的网速 | 按 §7.4 测量；补丁 P2；后续做低影响模式 |
 | 回调阻塞包处理线程 | 全机网络卡顿 | 默认不注册连接回调；日志回调非阻塞，满了直接丢弃 |
 | ProxyBridge 上游更新很快（v4.0.0 与 v4.1.0 相隔很近） | 合并上游变更困难 | 固定版本；补丁尽量少；升级时必须跑集成测试 |
-| mieru `pkg/` 内部接口变化 | 升级时编译失败 | 固定 3.38.0；把调用都封装在 `engine` 包内；退路是 `apis/client` 加自己实现的 SOCKS5 |
+| mieru `pkg/` 内部接口变化 | 升级时编译失败 | 固定 3.38.1；把调用都封装在 `engine` 包内；退路是 `apis/client` 加自己实现的 SOCKS5 |
 | 管理员程序被 DLL 劫持 | 被提权 | 按绝对路径加载；推荐安装版；文件完整性自检 |
 | 已经在运行的冒险岛没有被加速 | 用户以为加速无效 | 开始加速时检测并提示重启游戏 |
 | 节点配置里的密码明文保存 | 本机泄露风险 | 存在用户目录；日志去敏；M5 可选 DPAPI 加密 |
@@ -455,8 +494,12 @@ node_launcher/
 2. 程序文件名 `MSBOOST-Launcher.exe`，窗口标题“MSBOOST 启动器”（D9）。
 3. 首版需要托盘图标（D10，M0 第 9 项）。
 
-待确认：
+已确认（2026-10-13）：
 
-1. 首版以安装包为主、便携版为辅，可以吗？
-2. 代码签名：是否申请 SignPath 的开源免费签名？或者你已经有证书？
-3. 面板对接（会员登录后自动拉取配置）是否确定放到首版之后？
+4. 加速进程清单固定，用户不能自定义；另加 Discord、Steam 两个可选开关，默认关闭（§4.3）。
+5. 测速目标不写死，可以在设置中修改（§4.3）。
+6. 界面统一显示 MSBOOST，不出现 mieru（§1.4、D12）。
+7. 首选便携版；不做代码签名、面板对接和 `mieru://` 链接导入；沿用“网站下载配置文件、启动器读取”的方式（§1.3、§4.2、M3）。
+8. 核心使用 mieru 3.38.1（§2.1）。
+
+目前没有待确认事项。

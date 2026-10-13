@@ -3,10 +3,11 @@
   Build ProxyBridgeCore.dll (x64) from the pinned ProxyBridge submodule with MSVC.
 
 .DESCRIPTION
-  1. Copies third_party\ProxyBridge\Windows\src to .cache\core-src (the submodule stays pristine).
-  2. Applies every third_party\patches\*.patch in name order with "git apply".
-  3. Compiles with the same cl.exe flags as upstream compile.ps1 and links against WinDivert.
-  4. Writes ProxyBridgeCore.dll, WinDivert.dll and WinDivert64.sys to build\core\.
+  1. Runs prepare-core-src.ps1: copies the pinned sources to .cache\core-src (the
+     submodule stays pristine), normalizes line endings, applies and verifies
+     every third_party\patches\*.patch.
+  2. Compiles with the same cl.exe flags as upstream compile.ps1 and links against WinDivert.
+  3. Writes ProxyBridgeCore.dll, WinDivert.dll and WinDivert64.sys to build\core\.
 
   Requires Visual Studio 2022 (or Build Tools) with the C++ desktop workload,
   and WinDivert from scripts\fetch-windivert.ps1.
@@ -19,7 +20,6 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $upstreamSrc = Join-Path $root 'third_party\ProxyBridge\Windows\src'
-$patchDir = Join-Path $root 'third_party\patches'
 $workDir = Join-Path $root '.cache\core-src'
 $winDivert = Join-Path $root '.cache\windivert\WinDivert-2.2.2-A'
 $OutputDir = [IO.Path]::GetFullPath($OutputDir)
@@ -40,16 +40,8 @@ $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Compon
 if (-not $vsPath) { throw 'Visual Studio with the C++ x64 toolset was not found.' }
 $vcvars = Join-Path $vsPath 'VC\Auxiliary\Build\vcvarsall.bat'
 
-# Fresh copy of the pinned sources, then local patches.
-if (Test-Path -LiteralPath $workDir) { Remove-Item -LiteralPath $workDir -Recurse -Force }
-New-Item -ItemType Directory -Force -Path $workDir | Out-Null
-Copy-Item -Path (Join-Path $upstreamSrc '*') -Destination $workDir -Recurse
-$patches = @(Get-ChildItem -LiteralPath $patchDir -Filter '*.patch' -ErrorAction SilentlyContinue | Sort-Object Name)
-foreach ($patch in $patches) {
-    Write-Host "Applying $($patch.Name)"
-    & git -C $workDir apply --whitespace=nowarn $patch.FullName
-    if ($LASTEXITCODE -ne 0) { throw "Patch failed: $($patch.Name)" }
-}
+# Fresh copy of the pinned sources with local patches applied and verified.
+& (Join-Path $PSScriptRoot 'prepare-core-src.ps1')
 
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 $sources = @(Get-ChildItem -LiteralPath $workDir -Filter '*.c' | ForEach-Object { '"' + $_.FullName + '"' }) -join ' '

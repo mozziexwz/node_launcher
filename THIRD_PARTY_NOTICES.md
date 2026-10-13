@@ -5,7 +5,7 @@
 ## mieru
 
 - 来源：<https://github.com/enfein/mieru>
-- 版本：v3.38.0
+- 版本：v3.38.1
 - 许可：GPL-3.0
 - 使用方式：作为 Go 模块编译进程序（客户端多路复用与本地 SOCKS5 服务端）。
 
@@ -39,6 +39,17 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## 界面相关组件
+
+| 组件 | 版本 | 许可 | 来源 |
+|---|---|---|---|
+| Wails | v2.16.0 | MIT | <https://github.com/wailsapp/wails> |
+| fyne.io/systray | v1.12.2 | Apache-2.0 | <https://github.com/fyne-io/systray> |
+| React / React DOM | 19.x | MIT | <https://github.com/facebook/react> |
+| Vite | 7.x | MIT | <https://github.com/vitejs/vite> |
+
+`build/windows/icon.ico` 与 `build/appicon.png` 目前是 Wails 模板自带的占位图标，正式发布前替换为 MSBOOST 图标。
 
 ## WinDivert
 

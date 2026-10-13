@@ -3,11 +3,15 @@
 
 # 构建产物与缓存
 /build/bin/
+/build/core/
+/build/m0/
+/build/m1/
 /.cache/
 /dist/
 /frontend/node_modules/
-/frontend/dist/
-/frontend/wailsjs/
+/frontend/dist/*
+!/frontend/dist/gitkeep
+/frontend/package.json.md5
 
 # 二进制（ProxyBridgeCore.dll、WinDivert、mieru 等均由脚本或 CI 获取/生成）
 *.exe
@@ -23,3 +27,6 @@ msboost-state.dat
 # 编辑器
 .vscode/
 .idea/
+
+# 本地开发工具（wails CLI 等）
+/.tools/

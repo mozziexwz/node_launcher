@@ -1,0 +1,80 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Fetch WinDivert 2.2.2-A (checksum verified)
+        shell: pwsh
+        run: ./scripts/fetch-windivert.ps1
+
+      - name: Build ProxyBridgeCore.dll with MSVC
+        shell: pwsh
+        run: ./scripts/build-core.ps1
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.1'
+
+      - name: Vet
+        run: go vet ./...
+
+      # Node-side v2 probe for the contract test, pinned to mozziexwz/node v2.3.0.
+      - name: Fetch node-side tcp_probe.py
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .cache | Out-Null
+          Invoke-WebRequest -UseBasicParsing -OutFile .cache/tcp_probe.py `
+            https://raw.githubusercontent.com/mozziexwz/node/4ebfc29331e61b4f65870ebe9ce70b733eee8d74/installers/node/tcp_probe.py
+
+      - name: Test
+        env:
+          MSBOOST_CORE_DLL: ${{ github.workspace }}\build\core\ProxyBridgeCore.dll
+          MSBOOST_NODE_PROBE: ${{ github.workspace }}\.cache\tcp_probe.py
+        run: go test -count=1 ./...
+
+      - name: Build m0spike
+        run: go build -o build/m0/m0spike.exe ./cmd/m0spike
+
+      # M1 acceptance bundle: the CLI next to our patched core and WinDivert.
+      - name: Build msboostctl bundle
+        shell: pwsh
+        run: |
+          go build -o build/m1/msboostctl.exe ./cmd/msboostctl
+          Copy-Item build/core/* build/m1/
+          Get-ChildItem build/m1 | ForEach-Object { '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash, $_.Name } | Set-Content build/m1/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: m1-windows-x64
+          path: build/m1/
+          if-no-files-found: error
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Build launcher UI (Wails)
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0
+          wails build -clean -m -platform windows/amd64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: m0-windows-x64
+          path: |
+            build/core/
+            build/m0/m0spike.exe
+            build/bin/MSBOOST-Launcher.exe
+          if-no-files-found: error

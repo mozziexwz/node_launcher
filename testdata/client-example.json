@@ -1,0 +1,32 @@
+{
+  "profiles": [
+    {
+      "profileName": "default",
+      "user": {
+        "name": "test-user",
+        "password": "test-password"
+      },
+      "servers": [
+        {
+          "ipAddress": "192.0.2.10",
+          "domainName": "",
+          "portBindings": [
+            {
+              "port": 8964,
+              "protocol": "TCP"
+            }
+          ]
+        }
+      ],
+      "mtu": 1400,
+      "multiplexing": {
+        "level": "MULTIPLEXING_LOW"
+      },
+      "handshakeMode": "HANDSHAKE_STANDARD"
+    }
+  ],
+  "activeProfile": "default",
+  "rpcPort": 8965,
+  "socks5Port": 10086,
+  "loggingLevel": "INFO"
+}

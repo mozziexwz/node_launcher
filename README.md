@@ -5,13 +5,13 @@
 - 只代理冒险岛相关进程，其他软件直连。
 - 不改路由表、DNS 和系统代理，也不装虚拟网卡。
 
-> **状态：M0 技术验证进行中，尚不可用。** 规划见 [docs/MSBOOST一体化启动器开发规划.md](docs/MSBOOST一体化启动器开发规划.md)。
+> **状态：M1 核心引擎已通过真实游戏验收（[docs/m1/README.md](docs/m1/README.md)），下一步 M2 界面；尚不可用。** 规划见 [docs/MSBOOST一体化启动器开发规划.md](docs/MSBOOST一体化启动器开发规划.md)。
 
 ## 组成
 
 | 组件 | 版本 | 用途 |
 |---|---|---|
-| [mieru](https://github.com/enfein/mieru) | v3.38.0 | 进程内嵌入，提供本地 SOCKS5（只监听 127.0.0.1，端口随机，每次启动生成会话凭据） |
+| [mieru](https://github.com/enfein/mieru) | v3.38.1 | 进程内嵌入，提供本地 SOCKS5（只监听 127.0.0.1，端口随机，每次启动生成会话凭据） |
 | [ProxyBridge](https://github.com/InterceptSuite/ProxyBridge) 核心 | v4.1.0 | 编译为 `ProxyBridgeCore.dll`，基于 WinDivert 把指定进程的流量转进本地 SOCKS5 |
 | [WinDivert](https://github.com/basil00/WinDivert) | 2.2.2-A | 官方签名的驱动与库，原样分发 |
 | [Wails](https://wails.io) v2 + React/TypeScript | — | 界面（M0 搭建） |
@@ -19,11 +19,17 @@
 ## 目录
 
 ```text
-docs/          规划与设计文档；全程测速 v2 合同（MSBOOST全程TCP测速整改计划.md）
+main.go, app.go, tray.go   Wails 界面入口、前端绑定、托盘
+frontend/      界面（React + TypeScript + Vite）
+internal/      engine（嵌入 mieru）、redirector（ProxyBridgeCore.dll）、probe（网络检测）、profiles、winsys
+cmd/m0spike/   M0 验证工具（命令行）
+docs/          规划与设计文档；全程测速 v2 合同；M0 验证指南（docs/m0/）
 legacy/        旧版 BAT 启动器与 PowerShell 测试，仅供移植参考，不参与构建
 scripts/       获取 WinDivert、编译 ProxyBridgeCore.dll 等脚本
 third_party/   ProxyBridge 子模块（固定 v4.1.0），WinDivert 校验值
 ```
+
+构建界面：安装 Wails CLI v2.16.0（`go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0`），然后在仓库根目录执行 `wails build`，产物为 `build/bin/MSBOOST-Launcher.exe`。
 
 ## 开发环境
 
