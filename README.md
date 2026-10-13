@@ -5,7 +5,7 @@
 - 只代理冒险岛相关进程，其他软件直连。
 - 不改路由表、DNS 和系统代理，也不装虚拟网卡。
 
-> **状态：M1 核心引擎开发完成，待真实游戏验收（[docs/m1/README.md](docs/m1/README.md)）；界面尚不可用。** 规划见 [docs/MSBOOST一体化启动器开发规划.md](docs/MSBOOST一体化启动器开发规划.md)。
+> **状态：M1 核心引擎已通过真实游戏验收（[docs/m1/README.md](docs/m1/README.md)），下一步 M2 界面；尚不可用。** 规划见 [docs/MSBOOST一体化启动器开发规划.md](docs/MSBOOST一体化启动器开发规划.md)。
 
 ## 组成
 

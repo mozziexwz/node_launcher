@@ -1,7 +1,7 @@
 # MSBOOST 一体化启动器开发规划
 
 > 仓库：<https://github.com/mozziexwz/node_launcher>
-> 日期：2026-10-12（2026-10-13 更新）　状态：M0 已完成（`docs/m0/README.md`）；M1 核心引擎已完成开发，待真实游戏验收（`docs/m1/README.md`）。
+> 日期：2026-10-12（2026-10-13 更新）　状态：M0 已完成（`docs/m0/README.md`）；M1 已完成并通过真实游戏验收（`docs/m1/README.md`），下一步 M2 界面。
 >
 > 依据：
 > - `legacy/MSBOOST启动器_全程TCP测速.bat`，以及 `docs/MSBOOST全程TCP测速整改计划.md`
