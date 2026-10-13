@@ -123,5 +123,8 @@ jobs:
           name="MSBOOST-Launcher-${GITHUB_REF_NAME}-windows-x64"
           (cd package && zip -9 -r "../${name}.zip" .)
           sha256sum "${name}.zip" > "${name}.zip.sha256"
-          sed "s/{{VERSION}}/${GITHUB_REF_NAME}/g" docs/release-notes-template.md > notes.md
+          # docs/releases/<tag>.md if written, otherwise the template.
+          notes="docs/releases/${GITHUB_REF_NAME}.md"
+          [ -f "$notes" ] || notes=docs/release-notes-template.md
+          sed "s/{{VERSION}}/${GITHUB_REF_NAME}/g" "$notes" > notes.md
           gh release create "$GITHUB_REF_NAME" "${name}.zip" "${name}.zip.sha256" --draft --verify-tag --title "MSBOOST 启动器 ${GITHUB_REF_NAME}" --notes-file notes.md
