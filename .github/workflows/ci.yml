@@ -63,10 +63,13 @@ jobs:
         with:
           node-version: '24'
 
+      # Wails builds with -buildvcs=false, so the commit goes into the version.
       - name: Build launcher UI (Wails)
+        shell: pwsh
         run: |
           go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0
-          wails build -clean -m -platform windows/amd64
+          $version = 'dev-' + $env:GITHUB_SHA.Substring(0, 7)
+          wails build -clean -m -platform windows/amd64 -ldflags "-X main.version=$version"
 
       # M2 acceptance bundle: the portable launcher next to the same core files.
       - name: Assemble launcher bundle

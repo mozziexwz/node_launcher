@@ -82,7 +82,13 @@ export interface LogLine {
 export interface Component {
     name: string
     version: string
+    copyright: string
     license: string
+    url: string
+}
+
+export interface Link {
+    name: string
     url: string
 }
 
@@ -93,9 +99,10 @@ export interface Notice {
 
 export interface About {
     version: string
-    source: string
+    copyright: string
     license: string
     components: Component[]
+    licenseTexts: Link[]
 }
 
 const plain = <T>(v: unknown) => v as T

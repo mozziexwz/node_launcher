@@ -57,16 +57,33 @@ export default function App() {
     const [logs, setLogs] = useState<LogLine[]>([])
     const lastState = useRef<State | null>(null)
     const noticeId = useRef(0)
+    const refreshing = useRef<Promise<void> | null>(null)
+    const refreshAgain = useRef(false)
 
-    const refresh = useCallback(async () => {
-        try {
-            const o = await api.overview()
-            lastState.current = o.status.state
-            setOverview(o)
-            setLoadError('')
-        } catch (e) {
-            setLoadError(errorText(e))
+    // refresh reloads the overview. Calls made while one is running are merged
+    // into a single follow-up, so the backend never runs its checks in
+    // parallel (startup alone triggers a load and a window focus).
+    const refresh = useCallback((): Promise<void> => {
+        if (refreshing.current) {
+            refreshAgain.current = true
+            return refreshing.current
         }
+        const run = async () => {
+            do {
+                refreshAgain.current = false
+                try {
+                    const o = await api.overview()
+                    lastState.current = o.status.state
+                    setOverview(o)
+                    setLoadError('')
+                } catch (e) {
+                    setLoadError(errorText(e))
+                }
+            } while (refreshAgain.current)
+            refreshing.current = null
+        }
+        refreshing.current = run()
+        return refreshing.current
     }, [])
 
     useEffect(() => {

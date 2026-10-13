@@ -1,6 +1,9 @@
 package main
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/mozziexwz/node_launcher/internal/app"
 	"github.com/mozziexwz/node_launcher/internal/logx"
 	"github.com/mozziexwz/node_launcher/internal/probe"
@@ -96,17 +99,24 @@ type LogLineDTO struct {
 }
 
 type ComponentDTO struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
-	License string `json:"license"`
-	URL     string `json:"url"`
+	Name      string `json:"name"`
+	Version   string `json:"version"`
+	Copyright string `json:"copyright"`
+	License   string `json:"license"`
+	URL       string `json:"url"`
+}
+
+type LinkDTO struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
 }
 
 type AboutDTO struct {
-	Version    string         `json:"version"`
-	Source     string         `json:"source"`
-	License    string         `json:"license"`
-	Components []ComponentDTO `json:"components"`
+	Version      string         `json:"version"`
+	Copyright    string         `json:"copyright"`
+	License      string         `json:"license"`
+	Components   []ComponentDTO `json:"components"`
+	LicenseTexts []LinkDTO      `json:"licenseTexts"`
 }
 
 func toStatusDTO(st app.Status) StatusDTO {
@@ -156,9 +166,15 @@ func toConflictDTOs(list []app.Conflict) []ConflictDTO {
 	return out
 }
 
+// toResultDTO shows the latency once: Text has it (or why it failed) and
+// Detail only adds the success count and any partial failures.
 func toResultDTO(r probe.Result) ResultDTO {
+	detail := fmt.Sprintf("成功 %d/%d", r.SuccessCount, r.TotalCount)
+	if r.SuccessCount > 0 && r.SuccessCount < r.TotalCount {
+		detail += "；部分失败：" + strings.Join(r.Errors, "、")
+	}
 	return ResultDTO{
-		Text: r.Compact(), Detail: r.Detail(), OK: r.SuccessCount > 0,
+		Text: r.Compact(), Detail: detail, OK: r.SuccessCount > 0,
 		AverageMs: float64(r.Average.Microseconds()) / 1000,
 	}
 }

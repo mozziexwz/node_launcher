@@ -75,6 +75,30 @@ export function Confirm(props: {request: ConfirmRequest | null, onDone: () => vo
     )
 }
 
+// Modal shows content in a dialog that Escape, the backdrop or 关闭 dismisses.
+export function Modal(props: {title: string, onClose: () => void, children: ReactNode, wide?: boolean}) {
+    const {onClose} = props
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') onClose()
+        }
+        window.addEventListener('keydown', onKey)
+        return () => window.removeEventListener('keydown', onKey)
+    }, [onClose])
+    return (
+        <div className="modal-backdrop" onClick={onClose}>
+            <div className={'modal' + (props.wide ? ' wide' : '')} role="dialog" aria-modal="true" aria-label={props.title}
+                 onClick={e => e.stopPropagation()}>
+                <h3>{props.title}</h3>
+                <div className="modal-body">{props.children}</div>
+                <div className="modal-actions">
+                    <button className="primary" autoFocus onClick={onClose}>关闭</button>
+                </div>
+            </div>
+        </div>
+    )
+}
+
 // Maple is the MSBOOST mark, the same drawing as the website's.
 export function Maple(props: {size?: number}) {
     const size = props.size ?? 30

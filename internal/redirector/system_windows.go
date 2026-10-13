@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 	"unicode/utf16"
 
@@ -119,19 +120,27 @@ func stateName(state uint32) string {
 // relay can be probed this way: the UDP relay binds with SO_REUSEADDR, so a
 // second bind succeeds even while another instance owns the port. Every
 // ProxyBridge instance listens on the TCP relay, so it still reveals one.
-func RelayPortConflicts() []string {
+func RelayPortConflicts() []string { return portConflicts(relayTCPPort) }
+
+// probeMu serializes probes: two concurrent probes in this process would
+// find each other's listener and report the port as busy.
+var probeMu sync.Mutex
+
+func portConflicts(port int) []string {
+	probeMu.Lock()
+	defer probeMu.Unlock()
 	var busy []string
 	for _, network := range []string{"tcp4", "tcp6"} {
 		host := "0.0.0.0"
 		if network == "tcp6" {
 			host = "::"
 		}
-		ln, err := net.Listen(network, net.JoinHostPort(host, fmt.Sprint(relayTCPPort)))
+		ln, err := net.Listen(network, net.JoinHostPort(host, fmt.Sprint(port)))
 		if err != nil {
 			if network == "tcp6" && !hasIPv6() {
 				continue
 			}
-			busy = append(busy, fmt.Sprintf("TCP %d（%s）", relayTCPPort, host))
+			busy = append(busy, fmt.Sprintf("TCP %d（%s）", port, host))
 			continue
 		}
 		ln.Close()

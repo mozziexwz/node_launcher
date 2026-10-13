@@ -4,10 +4,11 @@ import (
 	"runtime/debug"
 )
 
-// version is set at release time with -ldflags "-X main.version=v1.2.3".
+// version is set at build time with -ldflags "-X main.version=v1.2.3".
+// Wails builds with -buildvcs=false, so CI passes the commit this way too.
 var version = "dev"
 
-const sourceURL = "https://github.com/mozziexwz/node_launcher"
+const copyrightNotice = "Copyright © 2026 MSBOOST"
 
 // Versions of the non-Go components, fixed by the build.
 const (
@@ -57,20 +58,34 @@ func moduleVersion(path string) string {
 }
 
 // aboutInfo backs the About page. GPL-3.0 requires interactive programs to
-// show the license notice; upstream component names appear only here.
+// show a copyright notice, the absence of warranty and how to read the
+// license. Component names, their copyright notices (LGPL-3.0 §4(c) for
+// WinDivert) and the license texts are behind the "开源许可" dialog.
 func aboutInfo() AboutDTO {
 	return AboutDTO{
-		Version: versionString(),
-		Source:  sourceURL,
-		License: "MSBOOST 启动器是自由软件，依据 GNU 通用公共许可证第 3 版（GPL-3.0）发布。" +
-			"本程序不提供任何担保。源代码与许可全文见项目主页。",
+		Version:   versionString(),
+		Copyright: copyrightNotice,
+		License: "MSBOOST 启动器是自由软件：你可以依据自由软件基金会发布的 GNU 通用公共许可证第 3 版（GPL-3.0）" +
+			"再发布和修改本程序。本程序不提供任何担保。许可全文和所用的开源组件见“开源许可”。",
 		Components: []ComponentDTO{
-			{Name: "mieru", Version: moduleVersion("github.com/enfein/mieru/v3"), License: "GPL-3.0", URL: "https://github.com/enfein/mieru"},
-			{Name: "ProxyBridge", Version: redirectorVersion, License: "MIT", URL: "https://github.com/InterceptSuite/ProxyBridge"},
-			{Name: "WinDivert", Version: winDivertVersion, License: "LGPL-3.0", URL: "https://github.com/basil00/WinDivert"},
-			{Name: "Wails", Version: moduleVersion("github.com/wailsapp/wails/v2"), License: "MIT", URL: "https://wails.io"},
-			{Name: "fyne.io/systray", Version: moduleVersion("fyne.io/systray"), License: "Apache-2.0", URL: "https://github.com/fyne-io/systray"},
-			{Name: "React", Version: "19", License: "MIT", URL: "https://react.dev"},
+			{Name: "mieru", Version: moduleVersion("github.com/enfein/mieru/v3"), Copyright: "Copyright (C) 2021-2026 mieru authors",
+				License: "GPL-3.0", URL: "https://github.com/enfein/mieru"},
+			{Name: "ProxyBridge", Version: redirectorVersion, Copyright: "Copyright (c) 2025 Anof-cyber/InterceptSuite",
+				License: "MIT", URL: "https://github.com/InterceptSuite/ProxyBridge"},
+			{Name: "WinDivert", Version: winDivertVersion, Copyright: "Copyright (C) 2019 basil",
+				License: "LGPL-3.0", URL: "https://github.com/basil00/WinDivert"},
+			{Name: "Wails", Version: moduleVersion("github.com/wailsapp/wails/v2"), Copyright: "Copyright (c) 2018-Present Lea Anthony",
+				License: "MIT", URL: "https://wails.io"},
+			{Name: "fyne.io/systray", Version: moduleVersion("fyne.io/systray"), Copyright: "fyne.io/systray 与 getlantern/systray 作者",
+				License: "Apache-2.0", URL: "https://github.com/fyne-io/systray"},
+			{Name: "React", Version: "19", Copyright: "Copyright (c) Meta Platforms, Inc. and affiliates.",
+				License: "MIT", URL: "https://react.dev"},
+		},
+		LicenseTexts: []LinkDTO{
+			{Name: "GPL-3.0", URL: "https://www.gnu.org/licenses/gpl-3.0.html"},
+			{Name: "LGPL-3.0", URL: "https://www.gnu.org/licenses/lgpl-3.0.html"},
+			{Name: "Apache-2.0", URL: "https://www.apache.org/licenses/LICENSE-2.0"},
+			{Name: "MIT", URL: "https://opensource.org/license/mit"},
 		},
 	}
 }

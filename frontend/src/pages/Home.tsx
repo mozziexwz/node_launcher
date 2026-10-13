@@ -155,12 +155,12 @@ export function Home(props: {
                         <dt>当前到中转服务器延迟</dt>
                         <dd className={check.entrance.ok ? 'ok' : 'bad'}>
                             {check.entrance.text}
-                            {check.entranceTarget && <span className="target">{check.entranceTarget}　{check.entrance.detail}</span>}
+                            {check.entranceTarget && <span className="target"> {check.entranceTarget}　{check.entrance.detail}</span>}
                         </dd>
                         <dt>当前到游戏服务器延迟</dt>
                         <dd className={check.game.ok ? 'ok' : 'bad'}>
                             {check.game.text}
-                            <span className="target">{check.gameTarget}　{check.game.detail}</span>
+                            <span className="target"> {check.gameTarget}　{check.game.detail}</span>
                         </dd>
                     </dl>
                 )}

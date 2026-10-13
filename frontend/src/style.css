@@ -601,7 +601,7 @@ dl.check dd {
 }
 
 dl.check .target {
-    margin-left: 12px;
+    margin-left: 8px;
     color: var(--faint);
     font-weight: 400;
     font-size: 12px;
@@ -867,6 +867,10 @@ table.components tr:last-child td {
     border-bottom: 0;
 }
 
+table.components td:last-child, table.components th:last-child {
+    white-space: nowrap;
+}
+
 /* ---- confirm dialog ---- */
 
 .modal-backdrop {
@@ -887,6 +891,22 @@ table.components tr:last-child td {
     border-radius: 16px;
     padding: 22px 24px 18px;
     box-shadow: 0 30px 100px rgba(0, 0, 0, .2);
+}
+
+.modal.wide {
+    width: 680px;
+}
+
+.modal-body table.components {
+    margin-top: 12px;
+    font-size: 12.5px;
+}
+
+.modal-body .license-links {
+    margin-top: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
 }
 
 .modal h3 {

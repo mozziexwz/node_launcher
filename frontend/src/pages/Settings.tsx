@@ -1,6 +1,6 @@
 import {useEffect, useState} from 'react'
 import {About, api, errorText, Overview} from '../api'
-import {Banner, Card, Spinner} from '../components'
+import {Banner, Card, Modal, Spinner} from '../components'
 
 export function Settings(props: {
     overview: Overview
@@ -13,6 +13,7 @@ export function Settings(props: {
     const [report, setReport] = useState<string[] | null>(null)
     const [cleaning, setCleaning] = useState(false)
     const [error, setError] = useState('')
+    const [showLicenses, setShowLicenses] = useState(false)
 
     useEffect(() => {
         api.about().then(setAbout).catch(e => setError(errorText(e)))
@@ -85,27 +86,49 @@ export function Settings(props: {
                         <dl className="facts">
                             <dt>版本</dt>
                             <dd>{about.version}</dd>
-                            <dt>源代码</dt>
-                            <dd><button className="link" onClick={() => api.openURL(about.source)}>{about.source}</button></dd>
+                            <dt>版权</dt>
+                            <dd>{about.copyright}</dd>
                         </dl>
                         <p className="notice">{about.license}</p>
-                        <table className="components">
-                            <thead>
-                                <tr><th>使用的开源组件</th><th>版本</th><th>许可</th></tr>
-                            </thead>
-                            <tbody>
-                                {about.components.map(c => (
-                                    <tr key={c.name}>
-                                        <td><button className="link" onClick={() => api.openURL(c.url)}>{c.name}</button></td>
-                                        <td>{c.version || '—'}</td>
-                                        <td>{c.license}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                        <div className="row-actions">
+                            <button onClick={() => setShowLicenses(true)}>开源许可…</button>
+                        </div>
                     </>
                 ) : <p className="muted"><Spinner/>正在读取…</p>}
             </Card>
+
+            {showLicenses && about && <Licenses about={about} onClose={() => setShowLicenses(false)}/>}
         </div>
+    )
+}
+
+// Licenses lists the open-source components with their copyright notices,
+// and links to the full license texts.
+function Licenses(props: {about: About, onClose: () => void}) {
+    return (
+        <Modal title="开源许可" wide onClose={props.onClose}>
+            <p>MSBOOST 启动器依据 GNU 通用公共许可证第 3 版（GPL-3.0）发布，使用了以下开源组件：</p>
+            <table className="components">
+                <thead>
+                    <tr><th>组件</th><th>版本</th><th>版权</th><th>许可</th></tr>
+                </thead>
+                <tbody>
+                    {props.about.components.map(c => (
+                        <tr key={c.name}>
+                            <td><button className="link" onClick={() => api.openURL(c.url)}>{c.name}</button></td>
+                            <td>{c.version || '—'}</td>
+                            <td>{c.copyright}</td>
+                            <td>{c.license}</td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+            <div className="license-links">
+                <span className="muted">许可全文：</span>
+                {props.about.licenseTexts.map(l => (
+                    <button key={l.name} className="link" onClick={() => api.openURL(l.url)}>{l.name}</button>
+                ))}
+            </div>
+        </Modal>
     )
 }

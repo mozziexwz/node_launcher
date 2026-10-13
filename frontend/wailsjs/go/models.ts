@@ -1,8 +1,23 @@
 export namespace main {
 	
+	export class LinkDTO {
+	    name: string;
+	    url: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new LinkDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.url = source["url"];
+	    }
+	}
 	export class ComponentDTO {
 	    name: string;
 	    version: string;
+	    copyright: string;
 	    license: string;
 	    url: string;
 	
@@ -14,15 +29,17 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
 	        this.version = source["version"];
+	        this.copyright = source["copyright"];
 	        this.license = source["license"];
 	        this.url = source["url"];
 	    }
 	}
 	export class AboutDTO {
 	    version: string;
-	    source: string;
+	    copyright: string;
 	    license: string;
 	    components: ComponentDTO[];
+	    licenseTexts: LinkDTO[];
 	
 	    static createFrom(source: any = {}) {
 	        return new AboutDTO(source);
@@ -31,9 +48,10 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.version = source["version"];
-	        this.source = source["source"];
+	        this.copyright = source["copyright"];
 	        this.license = source["license"];
 	        this.components = this.convertValues(source["components"], ComponentDTO);
+	        this.licenseTexts = this.convertValues(source["licenseTexts"], LinkDTO);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -211,6 +229,7 @@ export namespace main {
 	        this.current = source["current"];
 	    }
 	}
+	
 	export class LogLineDTO {
 	    seq: number;
 	    time: string;
