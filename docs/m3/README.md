@@ -108,7 +108,7 @@ icacls C:\ProgramData\MSBOOST
 
 ## 4. 发布第一个版本
 
-验收通过后，由你决定版本号（例如 `v0.1.0`）。打标签并推送后：
+首个版本定为正式版 `v1.0.0`（2026-10-14 决定，见规划 §6 M4）。打标签并推送后：
 - CI 会生成草稿 Release；
 - 你在 GitHub 上检查说明，补上“更新内容”，然后发布；
 - 网站下载页要在下载链接旁写上源代码地址 https://github.com/mozziexwz/node_launcher （GPL-3.0 第 6 条）。
