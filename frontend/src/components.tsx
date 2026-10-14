@@ -14,10 +14,21 @@ export function Card(props: {title?: ReactNode, actions?: ReactNode, children: R
     )
 }
 
-export function Banner(props: {kind: 'error' | 'warn' | 'info', children: ReactNode, onClose?: () => void}) {
+export function Banner(props: {
+    kind: 'error' | 'warn' | 'info'
+    children: ReactNode
+    onClose?: () => void
+    action?: {label: string, onClick: () => void, busy?: boolean}
+}) {
+    const a = props.action
     return (
         <div className={'banner ' + props.kind} role={props.kind === 'error' ? 'alert' : 'status'}>
             <div className="banner-text">{props.children}</div>
+            {a && (
+                <button className="banner-action" disabled={a.busy} onClick={a.onClick}>
+                    {a.busy && <Spinner/>}{a.label}
+                </button>
+            )}
             {props.onClose && <button className="link" onClick={props.onClose}>知道了</button>}
         </div>
     )

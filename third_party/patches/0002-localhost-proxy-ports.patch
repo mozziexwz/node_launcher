@@ -1,0 +1,66 @@
+--- a/ProxyBridge.c
++++ b/ProxyBridge.c
+@@ -72,6 +72,17 @@ volatile LONG port_direct_bitmap[2048]  = {0};  // 8 KB
+ 
+ UINT16 g_local_relay_port = LOCAL_PROXY_PORT;
+ BOOL g_localhost_via_proxy = FALSE;  // default disabled for security - most proxy server block localhost for ssrf and also many app might not work if localhost trafic goes to remote server if proxy server is on diffrent machine
++
++// MSBOOST patch P4: loopback TCP ports that rules may still proxy while
++// localhost routing is direct. The launcher lists the ports of the Windows
++// system proxy (v2rayN, Clash and the like) so that a game's requests to that
++// proxy reach the launcher instead. One bit per port, read lock-free.
++volatile LONG g_localhost_proxy_ports[2048] = {0};  // 8 KB
++
++static BOOL is_localhost_proxy_port(UINT16 port)
++{
++    return (g_localhost_proxy_ports[port >> 5] & (LONG)(1UL << (port & 31))) != 0;
++}
+ LogCallback g_log_callback = NULL;
+ ConnectionCallback g_connection_callback = NULL;
+ 
+@@ -473,7 +484,7 @@ DWORD WINAPI packet_processor(LPVOID arg)
+                     static const UINT8 v4mapped_pfx[12] = {0,0,0,0, 0,0,0,0, 0,0,0xff,0xff};
+                     BOOL is_lb6 = (memcmp(dst6, loopback6, 16) == 0);
+                     BOOL is_v4mapped_lb = (!is_lb6 && memcmp(dst6, v4mapped_pfx, 12) == 0 && dst6[12] == 127);
+-                    if (is_lb6 || is_v4mapped_lb)
++                    if ((is_lb6 || is_v4mapped_lb) && !is_localhost_proxy_port(dp))
+                         action6 = RULE_ACTION_DIRECT;
+                 }
+ 
+@@ -915,7 +926,8 @@ DWORD WINAPI packet_processor(LPVOID arg)
+                 action = check_process_rule(src_ip, src_port, orig_dest_ip, orig_dest_port, FALSE, &pid, &proxy_config_id);
+ 
+                 BYTE orig_dest_first_octet = (orig_dest_ip >> 0) & 0xFF;
+-                if (action == RULE_ACTION_PROXY && !g_localhost_via_proxy && orig_dest_first_octet == 127)
++                if (action == RULE_ACTION_PROXY && !g_localhost_via_proxy && orig_dest_first_octet == 127 &&
++                    !is_localhost_proxy_port(orig_dest_port))
+                     action = RULE_ACTION_DIRECT;
+ 
+                 // Override PROXY to DIRECT for criticl ips
+@@ -1036,6 +1048,15 @@ DWORD WINAPI packet_processor(LPVOID arg)
+     return 0;
+ }
+ 
++PROXYBRIDGE_API void ProxyBridge_SetLocalhostProxyPorts(const UINT16 *ports, UINT32 count)
++{
++    for (int i = 0; i < 2048; i++)
++        InterlockedExchange(&g_localhost_proxy_ports[i], 0);
++    for (UINT32 i = 0; ports != NULL && i < count; i++)
++        InterlockedOr(&g_localhost_proxy_ports[ports[i] >> 5], (LONG)(1UL << (ports[i] & 31)));
++    log_message("Localhost proxy ports: %u set", count);
++}
++
+ PROXYBRIDGE_API void ProxyBridge_SetLocalhostViaProxy(BOOL enable)
+ {
+     g_localhost_via_proxy = enable;
+--- a/ProxyBridge.h
++++ b/ProxyBridge.h
+@@ -60,6 +60,8 @@ PROXYBRIDGE_API BOOL ProxyBridge_EditRule(UINT32 rule_id, const char* process_na
+ PROXYBRIDGE_API BOOL ProxyBridge_MoveRuleToPosition(UINT32 rule_id, UINT32 new_position);  // Move rule to specific position (1=first, 2=second, etc)
+ PROXYBRIDGE_API UINT32 ProxyBridge_GetRulePosition(UINT32 rule_id);  // Get current position of rule in list (1-based)
+ PROXYBRIDGE_API void ProxyBridge_SetLocalhostViaProxy(BOOL enable);
++// MSBOOST patch P4: loopback TCP ports that rules may proxy while localhost routing is direct.
++PROXYBRIDGE_API void ProxyBridge_SetLocalhostProxyPorts(const UINT16 *ports, UINT32 count);
+ PROXYBRIDGE_API void ProxyBridge_SetLogCallback(LogCallback callback);
+ PROXYBRIDGE_API void ProxyBridge_SetConnectionCallback(ConnectionCallback callback);
+ PROXYBRIDGE_API void ProxyBridge_SetTrafficLoggingEnabled(BOOL enable);

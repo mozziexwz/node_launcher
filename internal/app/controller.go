@@ -23,6 +23,7 @@ import (
 	"github.com/mozziexwz/node_launcher/internal/probe"
 	"github.com/mozziexwz/node_launcher/internal/profiles"
 	"github.com/mozziexwz/node_launcher/internal/store"
+	"github.com/mozziexwz/node_launcher/internal/sysproxy"
 )
 
 // CoreEngine is a running embedded core (internal/engine.Engine).
@@ -42,15 +43,27 @@ type Redirector interface {
 	DeleteProxy(id uint32) bool
 	// AddProxyRule proxies TCP and UDP of the listed processes to proxyID.
 	AddProxyRule(processes string, proxyID uint32) (uint32, error)
+	// AddTCPRule proxies the processes' TCP connections to the listed hosts
+	// and ports (";"-separated) to proxyID; EditTCPRule changes such a rule
+	// in place, keeping its position in the evaluation order.
+	AddTCPRule(processes, hosts, ports string, proxyID uint32) (uint32, error)
+	EditTCPRule(id uint32, processes, hosts, ports string, proxyID uint32) error
+	EnableRule(id uint32) bool
+	DisableRule(id uint32) bool
 	DeleteRule(id uint32) bool
+	// SetLocalhostProxyPorts lists loopback TCP ports that rules may proxy
+	// while other localhost traffic stays direct (patch P4).
+	SetLocalhostProxyPorts(ports []uint16) error
 	Start() bool
 	Stop() bool
 }
 
-// Conflict is something that would interfere with acceleration.
+// Conflict is something that would interfere with acceleration. Fix, when
+// set, names a fix FixConflict can apply.
 type Conflict struct {
 	Message  string
 	Blocking bool
+	Fix      string
 }
 
 // System is the operating system as seen by the controller.
@@ -63,6 +76,8 @@ type System interface {
 	// Cleanup removes everything the launcher may leave on the system and
 	// reports what it did.
 	Cleanup(exePath string) []string
+	// FixConflict applies a conflict's fix and reports what it did.
+	FixConflict(fix string) ([]string, error)
 }
 
 // CheckFuncs are the network checks; nil fields use the probe package.
@@ -97,8 +112,11 @@ type Deps struct {
 	// PrepareRuntime, when set, checks the redirector's files before every
 	// start and keeps them locked until release is called after the start.
 	PrepareRuntime func() (release func(), err error)
-	System         System
-	Checks         CheckFuncs
+	// SystemProxies, when set, returns the Windows system proxy endpoints;
+	// the game's connections to them are then taken over (sysproxy.go).
+	SystemProxies func() []sysproxy.Endpoint
+	System        System
+	Checks        CheckFuncs
 }
 
 // State is the acceleration state.
@@ -122,6 +140,7 @@ type Status struct {
 	Download     int64
 	UploadRate   int64 // bytes per second
 	DownloadRate int64
+	SystemProxy  []string // system proxy endpoints being taken over
 	Addons       map[string]bool
 	LastError    string
 }
@@ -141,9 +160,11 @@ type session struct {
 	cfg     *engine.Config
 	eng     CoreEngine
 	proxyID uint32
-	rules   map[string]uint32 // gameRuleKey or addon ID -> rule id
+	rules   map[string]uint32 // gameRuleKey, systemProxyRuleKey or addon ID -> rule id
 	since   time.Time
 	secrets []string
+
+	takeover *proxyTakeover // nil when SystemProxies is not set
 }
 
 // Controller is safe for concurrent use.
@@ -201,6 +222,9 @@ func (c *Controller) statusLocked() Status {
 		st.Accepted, st.Active = stats.Accepted, stats.Active
 		st.Upload, st.Download = stats.Upload, stats.Download
 		st.UploadRate, st.DownloadRate = stats.UploadRate, stats.DownloadRate
+		if t := c.session.takeover; t != nil {
+			st.SystemProxy = t.endpointNames()
+		}
 	}
 	return st
 }
@@ -284,6 +308,8 @@ func (c *Controller) SetAddon(id string, on bool) error {
 	if c.state == StateStarting || c.state == StateStopping {
 		return ErrBusy
 	}
+	next := copySettings(c.settings)
+	next.Addons[id] = on
 	if c.state == StateRunning {
 		rules := c.session.rules
 		if ruleID, present := rules[id]; on && !present {
@@ -298,9 +324,10 @@ func (c *Controller) SetAddon(id string, on bool) error {
 			delete(rules, id)
 			c.log.Printf(logx.App, "已关闭 %s 加速（已建立的连接不受影响）", addon.Name)
 		}
+		if t := c.session.takeover; t != nil {
+			c.updateTakeoverLocked(t, proxiedProcesses(next))
+		}
 	}
-	next := copySettings(c.settings)
-	next.Addons[id] = on
 	if err := c.deps.Layout.SaveSettings(next); err != nil {
 		return err
 	}
@@ -335,6 +362,9 @@ func (c *Controller) Start() (warnings []string, err error) {
 	} else {
 		c.state = StateRunning
 		c.session = sess
+		if sess.takeover != nil {
+			c.watchSystemProxy(sess.takeover)
+		}
 	}
 	c.mu.Unlock()
 	c.emit()
@@ -421,6 +451,14 @@ func (c *Controller) startSession(s store.Settings) (sess *session, warnings []s
 		undo = append(undo, func() { red.DeleteRule(id) })
 		return nil
 	}
+	// The system-proxy rule must come first: rules match in order.
+	var takeover *proxyTakeover
+	if c.deps.SystemProxies != nil {
+		if takeover, err = c.startTakeover(red, eng, proxiedProcesses(s), &undo, &secrets); err != nil {
+			return nil, nil, err
+		}
+		rules[systemProxyRuleKey] = takeover.ruleID
+	}
 	if err := addRule(gameRuleKey, game.ProcessList()); err != nil {
 		return nil, nil, err
 	}
@@ -441,7 +479,7 @@ func (c *Controller) startSession(s store.Settings) (sess *session, warnings []s
 	c.log.Printf(logx.App, "加速已开始（节点配置 %s）", s.CurrentConfig)
 	return &session{
 		config: s.CurrentConfig, cfg: cfg, eng: eng, proxyID: proxyID,
-		rules: rules, since: time.Now(), secrets: secrets,
+		rules: rules, since: time.Now(), secrets: secrets, takeover: takeover,
 	}, warnings, nil
 }
 
@@ -478,6 +516,9 @@ func (c *Controller) Stop() error {
 	sess, red := c.session, c.red
 	c.mu.Unlock()
 	c.emit()
+	if sess.takeover != nil {
+		sess.takeover.stopWatching() // outside c.mu: the watcher takes it
+	}
 
 	started := time.Now()
 	if !red.Stop() {
@@ -492,6 +533,9 @@ func (c *Controller) Stop() error {
 		red.DeleteRule(id)
 	}
 	red.DeleteProxy(sess.proxyID)
+	if sess.takeover != nil {
+		c.stopTakeover(red, sess.takeover)
+	}
 	if state, err := c.deps.System.StopDriver(); err != nil {
 		c.log.Printf(logx.App, "驱动未能卸载（%s）：%v。如果其他软件正在使用它，这是正常的", state, err)
 	} else {
@@ -550,6 +594,25 @@ func (c *Controller) Cleanup(exePath string) ([]string, error) {
 		c.log.Printf(logx.App, "清理：%s", line)
 	}
 	return report, nil
+}
+
+// FixConflict resolves a conflict that the launcher can resolve itself, such
+// as stopping the official ProxyBridge. Only while idle.
+func (c *Controller) FixConflict(fix string) ([]string, error) {
+	c.mu.Lock()
+	idle := c.state == StateIdle
+	c.mu.Unlock()
+	if !idle {
+		return nil, ErrRunning
+	}
+	report, err := c.deps.System.FixConflict(fix)
+	for _, line := range report {
+		c.log.Printf(logx.App, "处理冲突：%s", line)
+	}
+	if err != nil {
+		c.log.Printf(logx.App, "处理冲突失败：%v", err)
+	}
+	return report, err
 }
 
 // CheckResult holds the three independent network checks.

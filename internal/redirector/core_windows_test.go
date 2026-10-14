@@ -51,6 +51,24 @@ func TestCoreABI(t *testing.T) {
 	if err != nil || other == ruleID {
 		t.Fatalf("second AddRule: id=%d err=%v", other, err)
 	}
+	if err := core.EditRule(other, "MapleStory.exe", "127.0.0.1;::1", "10808,7890", "*", ProtocolTCP, ActionProxy, proxyID); err != nil {
+		t.Fatalf("EditRule: %v", err)
+	}
+	if !core.DisableRule(other) || !core.EnableRule(other) {
+		t.Fatal("DisableRule/EnableRule failed")
+	}
+	// Our patched build (CI sets MSBOOST_CORE_DLL) must have patch P4; the
+	// official DLL may lack it.
+	switch err := core.SetLocalhostProxyPorts([]uint16{10808, 7890}); {
+	case err == nil:
+		if err := core.SetLocalhostProxyPorts(nil); err != nil {
+			t.Fatalf("clearing localhost proxy ports: %v", err)
+		}
+	case os.Getenv("MSBOOST_CORE_DLL") != "":
+		t.Fatalf("SetLocalhostProxyPorts on the patched core: %v", err)
+	default:
+		t.Logf("official core without patch P4: %v", err)
+	}
 	if !core.DeleteRule(other) || !core.DeleteRule(ruleID) {
 		t.Fatal("DeleteRule failed")
 	}

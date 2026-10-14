@@ -10,6 +10,8 @@ export function DeleteConfig(arg1:string):Promise<void>;
 
 export function ExportDiagnostics():Promise<string>;
 
+export function FixConflict(arg1:string):Promise<Array<string>>;
+
 export function HideToTray():Promise<void>;
 
 export function ImportConfig(arg1:string,arg2:boolean):Promise<main.ImportResultDTO>;

@@ -44,10 +44,14 @@ const (
 )
 
 var exportNames = []string{
-	"AddProxyConfig", "DeleteProxyConfig", "AddRule", "DeleteRule",
-	"SetLocalhostViaProxy", "SetLogCallback", "SetConnectionCallback",
-	"SetTrafficLoggingEnabled", "Start", "Stop",
+	"AddProxyConfig", "DeleteProxyConfig", "AddRule", "DeleteRule", "EditRule",
+	"EnableRule", "DisableRule", "SetLocalhostViaProxy", "SetLogCallback",
+	"SetConnectionCallback", "SetTrafficLoggingEnabled", "Start", "Stop",
 }
+
+// optionalExports exist only in our patched build (patch P4); the official
+// DLL lacks them.
+var optionalExports = []string{"SetLocalhostProxyPorts"}
 
 // Core is a loaded ProxyBridgeCore.dll. The engine keeps global state, so
 // only one Core should be used per process. Never unload it while worker
@@ -77,6 +81,11 @@ func Load(path string) (*Core, error) {
 			return nil, fmt.Errorf("%s 缺少导出函数 ProxyBridge_%s", abs, name)
 		}
 		c.procs[name] = addr
+	}
+	for _, name := range optionalExports {
+		if addr, err := windows.GetProcAddress(module, "ProxyBridge_"+name); err == nil {
+			c.procs[name] = addr
+		}
 	}
 	return c, nil
 }
@@ -155,6 +164,48 @@ func (c *Core) AddRule(processes, hosts, ports, domains string, protocol Protoco
 // DeleteRule removes a rule added with AddRule.
 func (c *Core) DeleteRule(id uint32) bool {
 	return int32(c.call("DeleteRule", uintptr(id))) != 0
+}
+
+// EditRule replaces a rule's fields in place, keeping its position in the
+// evaluation order.
+func (c *Core) EditRule(id uint32, processes, hosts, ports, domains string, protocol Protocol, action Action, proxyID uint32) error {
+	args := make([]*byte, 4)
+	for i, s := range []string{processes, hosts, ports, domains} {
+		p, err := cString(s)
+		if err != nil {
+			return err
+		}
+		args[i] = p
+	}
+	ok := int32(c.call("EditRule", uintptr(id), ptr(args[0]), ptr(args[1]), ptr(args[2]), ptr(args[3]),
+		uintptr(protocol), uintptr(action), uintptr(proxyID))) != 0
+	runtime.KeepAlive(args)
+	if !ok {
+		return errors.New("分流核心拒绝了分流规则")
+	}
+	return nil
+}
+
+// EnableRule and DisableRule switch a rule without moving it.
+func (c *Core) EnableRule(id uint32) bool  { return int32(c.call("EnableRule", uintptr(id))) != 0 }
+func (c *Core) DisableRule(id uint32) bool { return int32(c.call("DisableRule", uintptr(id))) != 0 }
+
+// ErrNoLocalhostProxyPorts means the DLL lacks patch P4.
+var ErrNoLocalhostProxyPorts = errors.New("分流核心不支持接管本机的系统代理端口")
+
+// SetLocalhostProxyPorts lists loopback TCP ports that rules may proxy even
+// though other localhost traffic stays direct (patch P4).
+func (c *Core) SetLocalhostProxyPorts(ports []uint16) error {
+	if _, ok := c.procs["SetLocalhostProxyPorts"]; !ok {
+		return ErrNoLocalhostProxyPorts
+	}
+	// A slice of non-constant length lives on the heap, which never moves,
+	// so its address stays valid during the call.
+	buf := make([]uint16, len(ports)+1)
+	copy(buf, ports)
+	c.call("SetLocalhostProxyPorts", uintptr(unsafe.Pointer(&buf[0])), uintptr(len(ports)))
+	runtime.KeepAlive(buf)
+	return nil
 }
 
 // SetLocalhostViaProxy controls whether 127.0.0.0/8 and ::1 traffic may be proxied.

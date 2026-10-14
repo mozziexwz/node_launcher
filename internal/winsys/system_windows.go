@@ -16,8 +16,16 @@ import (
 // Conflict is something that would interfere with acceleration.
 type Conflict struct {
 	Message  string
-	Blocking bool // acceleration must not start while it remains
+	Blocking bool   // acceleration must not start while it remains
+	Fix      string // FixProxyBridge when the launcher can resolve it, else ""
 }
+
+// FixProxyBridge names the fix that ends the ProxyBridge app and stops its
+// service.
+const FixProxyBridge = "proxybridge"
+
+// ProxyBridgePrograms are the official ProxyBridge app's processes.
+var ProxyBridgePrograms = []string{"ProxyBridge.exe", "ProxyBridge_CLI.exe"}
 
 // ConflictInputs are the facts Conflicts reasons about; gathered separately
 // so the rules can be tested without the real system.
@@ -40,8 +48,9 @@ func Conflicts(in ConflictInputs) []Conflict {
 	var out []Conflict
 	if in.ProxyBridgeServiceState == "RUNNING" || in.ProxyBridgeServiceState == "START_PENDING" {
 		out = append(out, Conflict{
-			Message:  "检测到 ProxyBridge 的后台服务正在运行，请先关闭 ProxyBridge，并在管理员命令行执行 sc stop ProxyBridgeSvc",
+			Message:  "检测到 ProxyBridge 的后台服务正在运行，它会和 MSBOOST 抢用分流驱动，需要先停止",
 			Blocking: true,
+			Fix:      FixProxyBridge,
 		})
 	}
 	running := make(map[string]bool)
@@ -49,7 +58,7 @@ func Conflicts(in ConflictInputs) []Conflict {
 		running[strings.ToLower(p)] = true
 	}
 	if running["proxybridge.exe"] || running["proxybridge_cli.exe"] {
-		out = append(out, Conflict{Message: "检测到 ProxyBridge 正在运行，请先退出它", Blocking: true})
+		out = append(out, Conflict{Message: "检测到 ProxyBridge 正在运行，需要先退出它", Blocking: true, Fix: FixProxyBridge})
 	}
 	if running["netch.exe"] {
 		out = append(out, Conflict{Message: "检测到 Netch 正在运行，同时使用可能重复代理游戏，建议先退出 Netch", Blocking: false})

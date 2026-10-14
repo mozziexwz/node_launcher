@@ -2,6 +2,10 @@ import {useState} from 'react'
 import {api, Check, errorText, Overview} from '../api'
 import {Banner, Card, formatBytes, formatUptime, Spinner, Switch, useClock} from '../components'
 
+const fixLabels: Record<string, string> = {
+    proxybridge: '停止 ProxyBridge',
+}
+
 const stateText = {
     idle: '未加速',
     starting: '正在开始加速…',
@@ -26,6 +30,8 @@ export function Home(props: {
     const [check, setCheck] = useState<Check | null>(null)
     const [checking, setChecking] = useState(false)
     const [checkError, setCheckError] = useState('')
+    const [fixing, setFixing] = useState('')
+    const [fixReport, setFixReport] = useState<string[]>([])
     useClock(running)
 
     const hasCurrent = validConfigs.some(c => c.current)
@@ -71,6 +77,33 @@ export function Home(props: {
         await props.refresh()
     }
 
+    const fixConflict = async (fix: string) => {
+        if (!await props.confirm('停止 ProxyBridge',
+            'MSBOOST 会结束 ProxyBridge 程序，并停止它的后台服务（ProxyBridgeSvc）。' +
+            '如果它设置了开机启动，下次开机还会运行；不再使用的话，建议卸载 ProxyBridge。确定继续吗？', '停止', true)) {
+            return
+        }
+        setFixing(fix)
+        setError('')
+        setFixReport([])
+        try {
+            setFixReport(await api.fixConflict(fix))
+        } catch (e) {
+            setError(errorText(e))
+        } finally {
+            setFixing('')
+            await props.refresh()
+        }
+    }
+
+    // One button per fix, even when two conflicts share it.
+    const fixShown = new Set<string>()
+    const fixAction = (fix: string) => {
+        if (!fix || fixShown.has(fix) || busy) return undefined
+        fixShown.add(fix)
+        return {label: fixLabels[fix] ?? '自动处理', onClick: () => fixConflict(fix), busy: fixing === fix}
+    }
+
     const runCheck = async () => {
         setChecking(true)
         setCheckError('')
@@ -89,7 +122,10 @@ export function Home(props: {
             {o.lockError && <Banner kind="error">{o.lockError}</Banner>}
             {!o.elevated && <Banner kind="error">程序没有以管理员身份运行，无法开始加速。请右键程序选择“以管理员身份运行”。</Banner>}
             {o.settingsError && <Banner kind="warn">{o.settingsError}</Banner>}
-            {o.conflicts.map(c => <Banner key={c.message} kind={c.blocking ? 'error' : 'warn'}>{c.message}</Banner>)}
+            {o.conflicts.map(c => (
+                <Banner key={c.message} kind={c.blocking ? 'error' : 'warn'} action={fixAction(c.fix)}>{c.message}</Banner>
+            ))}
+            {fixReport.length > 0 && <Banner kind="info" onClose={() => setFixReport([])}>{fixReport.join('；')}</Banner>}
             {error && <Banner kind="error" onClose={() => setError('')}>{error}</Banner>}
             {warnings.map(w => <Banner key={w} kind="warn" onClose={() => setWarnings(ws => ws.filter(x => x !== w))}>{w}</Banner>)}
 
@@ -98,11 +134,18 @@ export function Home(props: {
                     <div className="hero-label">{stateText[st.state]}</div>
                     <div className="hero-sub">
                         {st.state === 'running' ? (
-                                <div className="hero-stats">
-                                    <span>已运行 <b>{formatUptime(st.sinceUnix)}</b></span>
-                                    <span>已使用流量 <b>{formatBytes(st.upload + st.download)}</b></span>
-                                    <span>当前速率 <b>↑ {formatBytes(st.uploadRate)}/s</b> <b>↓ {formatBytes(st.downloadRate)}/s</b></span>
-                                </div>
+                                <>
+                                    <div className="hero-stats">
+                                        <span>已运行 <b>{formatUptime(st.sinceUnix)}</b></span>
+                                        <span>已使用流量 <b>{formatBytes(st.upload + st.download)}</b></span>
+                                        <span>当前速率 <b>↑ {formatBytes(st.uploadRate)}/s</b> <b>↓ {formatBytes(st.downloadRate)}/s</b></span>
+                                    </div>
+                                    {st.systemProxy && st.systemProxy.length > 0 && (
+                                        <div className="hero-note">
+                                            已接管系统代理 {st.systemProxy.join('、')}：游戏发往它的请求改由 MSBOOST 发出
+                                        </div>
+                                    )}
+                                </>
                             )
                             : st.state === 'starting' ? '正在连接 MSBOOST 节点并加载分流驱动…'
                             : st.state === 'stopping' ? '正在断开连接并卸载分流驱动…'

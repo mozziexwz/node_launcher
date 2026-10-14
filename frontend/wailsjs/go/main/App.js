@@ -18,6 +18,10 @@ export function ExportDiagnostics() {
   return window['go']['main']['App']['ExportDiagnostics']();
 }
 
+export function FixConflict(arg1) {
+  return window['go']['main']['App']['FixConflict'](arg1);
+}
+
 export function HideToTray() {
   return window['go']['main']['App']['HideToTray']();
 }

@@ -4,8 +4,12 @@ package winsys
 
 import (
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestConflicts(t *testing.T) {
@@ -17,7 +21,7 @@ func TestConflicts(t *testing.T) {
 	}{
 		{"clean", ConflictInputs{ProxyBridgeServiceState: "STOPPED"}, nil, false},
 		{"service running", ConflictInputs{ProxyBridgeServiceState: "RUNNING", RelayPortsBusy: []string{"TCP 34010（0.0.0.0）"}},
-			[]string{"sc stop ProxyBridgeSvc"}, true},
+			[]string{"ProxyBridge 的后台服务"}, true},
 		{"gui running", ConflictInputs{RunningProcesses: []string{"ProxyBridge.exe"}}, []string{"ProxyBridge 正在运行"}, true},
 		{"netch is only a warning", ConflictInputs{RunningProcesses: []string{"netch.EXE"}}, []string{"Netch"}, false},
 		{"port held by something else", ConflictInputs{ProxyBridgeServiceState: "NOT_INSTALLED", RelayPortsBusy: []string{"TCP 34010（::）"}},
@@ -69,4 +73,36 @@ func TestAcquireInstance(t *testing.T) {
 		t.Fatalf("acquire after release: %v", err)
 	}
 	release2()
+}
+
+func TestTerminateProcesses(t *testing.T) {
+	// A copy of ping.exe under a unique name, so nothing else is touched.
+	name := "msboost-test-dummy.exe"
+	path := filepath.Join(t.TempDir(), name)
+	src, err := os.ReadFile(filepath.Join(os.Getenv("SystemRoot"), "System32", "PING.EXE"))
+	if err != nil {
+		t.Skipf("ping.exe not available: %v", err)
+	}
+	if err := os.WriteFile(path, src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(path, "-n", "30", "127.0.0.1")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+
+	n, err := TerminateProcesses([]string{"MSBOOST-Test-Dummy.exe"})
+	if err != nil || n != 1 {
+		t.Fatalf("ended %d processes, err %v", n, err)
+	}
+	select {
+	case <-exited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the process is still running")
+	}
+	if n, err := TerminateProcesses([]string{name}); n != 0 || err != nil {
+		t.Fatalf("nothing left to end, got %d, %v", n, err)
+	}
 }

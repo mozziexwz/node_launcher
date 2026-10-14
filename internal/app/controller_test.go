@@ -18,6 +18,7 @@ import (
 	"github.com/mozziexwz/node_launcher/internal/probe"
 	"github.com/mozziexwz/node_launcher/internal/profiles"
 	"github.com/mozziexwz/node_launcher/internal/store"
+	"github.com/mozziexwz/node_launcher/internal/sysproxy"
 )
 
 // ---- fakes ----
@@ -92,6 +93,47 @@ func (r *fakeRedirector) AddProxyRule(processes string, proxyID uint32) (uint32,
 	return r.nextID, nil
 }
 
+func (r *fakeRedirector) AddTCPRule(processes, hosts, ports string, proxyID uint32) (uint32, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.record(fmt.Sprintf("add-tcp-rule %s -> %s:%s via %d", processes, hosts, ports, proxyID))
+	r.nextID++
+	r.rules[r.nextID] = processes
+	return r.nextID, nil
+}
+
+func (r *fakeRedirector) EditTCPRule(id uint32, processes, hosts, ports string, proxyID uint32) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.record(fmt.Sprintf("edit-tcp-rule %d %s -> %s:%s via %d", id, processes, hosts, ports, proxyID))
+	if _, ok := r.rules[id]; !ok {
+		return errors.New("no such rule")
+	}
+	r.rules[id] = processes
+	return nil
+}
+
+func (r *fakeRedirector) EnableRule(id uint32) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.record(fmt.Sprintf("enable-rule %d", id))
+	return true
+}
+
+func (r *fakeRedirector) DisableRule(id uint32) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.record(fmt.Sprintf("disable-rule %d", id))
+	return true
+}
+
+func (r *fakeRedirector) SetLocalhostProxyPorts(ports []uint16) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.record(fmt.Sprintf("localhost-ports %v", ports))
+	return nil
+}
+
 func (r *fakeRedirector) DeleteRule(id uint32) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -129,6 +171,13 @@ func (s *fakeSystem) Conflicts() []Conflict              { return s.conflicts }
 func (s *fakeSystem) RunningProcesses([]string) []string { return s.running }
 func (s *fakeSystem) StopDriver() (string, error)        { s.driverStops++; return "STOPPED", nil }
 func (s *fakeSystem) Cleanup(string) []string            { s.cleanups++; return []string{"done"} }
+func (s *fakeSystem) FixConflict(fix string) ([]string, error) {
+	if fix != "proxybridge" {
+		return nil, errors.New("unknown fix")
+	}
+	s.conflicts = nil
+	return []string{"stopped"}, nil
+}
 
 type harness struct {
 	c        *Controller
@@ -144,6 +193,9 @@ type harness struct {
 
 	runtimeErr error
 	runtimeLog []string // "lock", then "unlock after <last redirector call>"
+
+	// proxies, when not nil, enables the system proxy takeover.
+	proxies func() []sysproxy.Endpoint
 }
 
 func exampleConfig(t *testing.T) map[string]any {
@@ -222,8 +274,9 @@ func newHarness(t *testing.T, mutate func(*harness)) *harness {
 				h.mu.Unlock()
 			}, nil
 		},
-		System: h.sys,
-		Checks: h.fakeChecks(),
+		SystemProxies: h.proxies,
+		System:        h.sys,
+		Checks:        h.fakeChecks(),
 	})
 	return h
 }
@@ -703,4 +756,131 @@ func TestCheckWhileRunningReusesTheSessionCore(t *testing.T) {
 	}
 	h.c.Stop()
 	h.allEnginesClosed(t)
+}
+
+// ---- system proxy takeover ----
+
+func endpoint(s string) sysproxy.Endpoint {
+	host, port, _ := net.SplitHostPort(s)
+	var p int
+	fmt.Sscan(port, &p)
+	ip := net.ParseIP(host)
+	if v4 := ip.To4(); v4 != nil {
+		ip = v4
+	}
+	return sysproxy.Endpoint{IP: ip, Port: uint16(p)}
+}
+
+// waitFor polls the redirector's calls until one contains want.
+func (h *harness) waitFor(t *testing.T, want string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		calls, _, _ := h.red.snapshot()
+		for _, c := range calls {
+			if strings.Contains(c, want) {
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	calls, _, _ := h.red.snapshot()
+	t.Fatalf("no call containing %q in:\n%s", want, strings.Join(calls, "\n"))
+}
+
+func TestSystemProxyTakeover(t *testing.T) {
+	old := systemProxyRefresh
+	systemProxyRefresh = 10 * time.Millisecond
+	defer func() { systemProxyRefresh = old }()
+
+	var mu sync.Mutex
+	current := []sysproxy.Endpoint{endpoint("127.0.0.1:10808")}
+	setProxies := func(eps ...sysproxy.Endpoint) { mu.Lock(); current = eps; mu.Unlock() }
+	h := newHarness(t, func(h *harness) {
+		h.proxies = func() []sysproxy.Endpoint {
+			mu.Lock()
+			defer mu.Unlock()
+			return append([]sysproxy.Endpoint(nil), current...)
+		}
+	})
+
+	if _, err := h.c.Start(); err != nil {
+		t.Fatal(err)
+	}
+	game := profiles.DefaultMapleStory().ProcessList()
+	calls, _, _ := h.red.snapshot()
+	// Proxies 1 and 2, then the takeover rule (3) before the game rule (4).
+	if len(calls) != 7 || calls[0] != "prepare" || !strings.HasPrefix(calls[1], "add-socks5 127.0.0.1:40000 ") ||
+		!strings.HasPrefix(calls[2], "add-socks5 127.0.0.1:") || !strings.HasSuffix(calls[2], "domain=false") ||
+		calls[3] != "add-tcp-rule "+game+" -> 127.0.0.1:10808 via 2" ||
+		calls[4] != "localhost-ports [10808]" || calls[5] != "add-rule "+game || calls[6] != "start" {
+		t.Fatalf("start sequence:\n%s", strings.Join(calls, "\n"))
+	}
+	var takeoverPort int
+	fmt.Sscanf(calls[2], "add-socks5 127.0.0.1:%d", &takeoverPort)
+	if st := h.c.Status(); len(st.SystemProxy) != 1 || st.SystemProxy[0] != "127.0.0.1:10808" {
+		t.Fatalf("status system proxy %v", st.SystemProxy)
+	}
+
+	// v2rayN switched off, then another app on another port.
+	setProxies()
+	h.waitFor(t, "edit-tcp-rule 3 "+game+" -> 127.0.0.1:1 via 2")
+	h.waitFor(t, "disable-rule 3")
+	h.waitFor(t, "localhost-ports []")
+	setProxies(endpoint("127.0.0.1:7890"))
+	h.waitFor(t, "edit-tcp-rule 3 "+game+" -> 127.0.0.1:7890 via 2")
+	h.waitFor(t, "enable-rule 3")
+	h.waitFor(t, "localhost-ports [7890]")
+
+	// Discord's own requests to the proxy are taken over too.
+	if err := h.c.SetAddon("discord", true); err != nil {
+		t.Fatal(err)
+	}
+	h.waitFor(t, "edit-tcp-rule 3 "+game+";Discord.exe;DiscordPTB.exe;DiscordCanary.exe -> 127.0.0.1:7890 via 2")
+
+	if err := h.c.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	calls, rules, proxies := h.red.snapshot()
+	if rules != 0 || proxies != 0 {
+		t.Fatalf("left %d rules and %d proxies:\n%s", rules, proxies, strings.Join(calls, "\n"))
+	}
+	if conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", takeoverPort), time.Second); err == nil {
+		conn.Close()
+		t.Fatal("the stand-in proxy must be closed after stopping")
+	}
+	if st := h.c.Status(); st.SystemProxy != nil {
+		t.Fatalf("idle status still lists %v", st.SystemProxy)
+	}
+}
+
+func TestSystemProxyRuleWaitsDisabledWithoutProxy(t *testing.T) {
+	h := newHarness(t, func(h *harness) {
+		h.proxies = func() []sysproxy.Endpoint { return nil }
+	})
+	if _, err := h.c.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer h.c.Stop()
+	h.waitFor(t, "add-tcp-rule "+profiles.DefaultMapleStory().ProcessList()+" -> 127.0.0.1:1 via 2")
+	h.waitFor(t, "disable-rule 3")
+}
+
+func TestFixConflictOnlyWhileIdle(t *testing.T) {
+	h := newHarness(t, nil)
+	h.sys.conflicts = []Conflict{{Message: "ProxyBridge", Blocking: true, Fix: "proxybridge"}}
+	if _, err := h.c.Start(); err == nil {
+		t.Fatal("a blocking conflict must stop the start")
+	}
+	report, err := h.c.FixConflict("proxybridge")
+	if err != nil || len(report) != 1 {
+		t.Fatalf("fix: %v, %v", report, err)
+	}
+	if _, err := h.c.Start(); err != nil {
+		t.Fatalf("start after the fix: %v", err)
+	}
+	defer h.c.Stop()
+	if _, err := h.c.FixConflict("proxybridge"); !errors.Is(err, ErrRunning) {
+		t.Fatalf("fix while running: %v", err)
+	}
 }
