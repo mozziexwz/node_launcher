@@ -73,6 +73,10 @@ type System interface {
 	RunningProcesses(names []string) []string
 	// StopDriver stops the packet driver service and reports its state.
 	StopDriver() (string, error)
+	// DriverUnloading reports whether the packet driver is still being
+	// removed (for example while another WinDivert program let go of it);
+	// it cannot be started again until that finishes.
+	DriverUnloading() bool
 	// Cleanup removes everything the launcher may leave on the system and
 	// reports what it did.
 	Cleanup(exePath string) []string
@@ -400,6 +404,9 @@ func (c *Controller) startSession(s store.Settings) (sess *session, warnings []s
 	if s.CurrentConfig == "" {
 		return nil, nil, ErrNoConfig
 	}
+	if err := c.waitForDriver(); err != nil {
+		return nil, nil, err
+	}
 	if prepare := c.deps.PrepareRuntime; prepare != nil {
 		release, err := prepare()
 		if err != nil {
@@ -470,6 +477,9 @@ func (c *Controller) startSession(s store.Settings) (sess *session, warnings []s
 		}
 	}
 	if !red.Start() {
+		if sys.DriverUnloading() {
+			return nil, nil, errDriverUnloading
+		}
 		return nil, nil, errors.New("分流启动失败，详细原因见日志")
 	}
 
@@ -481,6 +491,34 @@ func (c *Controller) startSession(s store.Settings) (sess *session, warnings []s
 		config: s.CurrentConfig, cfg: cfg, eng: eng, proxyID: proxyID,
 		rules: rules, since: time.Now(), secrets: secrets, takeover: takeover,
 	}, warnings, nil
+}
+
+// How long a start waits for a previous packet driver to finish unloading.
+var (
+	driverWait = 60 * time.Second
+	driverPoll = time.Second
+)
+
+var errDriverUnloading = errors.New("分流驱动一直没有卸载完成。请关闭其他使用分流驱动的软件（如 ProxyBridge、GoodbyeDPI）后再试；如果仍然不行，重启电脑即可")
+
+// waitForDriver waits while the packet driver is still being removed, which
+// happens for a while after another WinDivert program (such as ProxyBridge)
+// has let go of it; starting before that fails with error 1058.
+func (c *Controller) waitForDriver() error {
+	sys := c.deps.System
+	if !sys.DriverUnloading() {
+		return nil
+	}
+	c.log.Printf(logx.App, "分流驱动还在卸载（通常是刚关闭的其他分流软件还占用着它），正在等待，最多 %d 秒", int(driverWait/time.Second))
+	deadline := time.Now().Add(driverWait)
+	for sys.DriverUnloading() {
+		if time.Now().After(deadline) {
+			return errDriverUnloading
+		}
+		time.Sleep(driverPoll)
+	}
+	c.log.Printf(logx.App, "分流驱动已卸载完成，继续开始加速")
+	return nil
 }
 
 func (c *Controller) redirector() (Redirector, error) {

@@ -100,6 +100,10 @@ type windowsSystem struct{}
 
 func (windowsSystem) Elevated() bool { return winsys.IsElevated() }
 
+func (windowsSystem) DriverUnloading() bool {
+	return redirector.ServiceUnloading(redirector.WinDivertService)
+}
+
 func (windowsSystem) Conflicts() []Conflict {
 	state, _ := redirector.ServiceState(redirector.ProxyBridgeService)
 	running, _ := winsys.RunningMatches(winsys.ConflictingPrograms())

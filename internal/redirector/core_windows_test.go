@@ -111,3 +111,12 @@ func TestFirewallRuleNames(t *testing.T) {
 		t.Fatal("different paths should hash differently")
 	}
 }
+
+func TestServiceUnloading(t *testing.T) {
+	if ServiceUnloading("msboost-no-such-service") {
+		t.Fatal("a missing service is not unloading")
+	}
+	if ServiceUnloading("EventLog") { // always running
+		t.Fatal("a running service is not unloading")
+	}
+}

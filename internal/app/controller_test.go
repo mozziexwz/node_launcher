@@ -164,6 +164,20 @@ type fakeSystem struct {
 	running     []string
 	driverStops int
 	cleanups    int
+	unloading   int // DriverUnloading answers true this many times; -1 forever
+	mu          sync.Mutex
+}
+
+func (s *fakeSystem) DriverUnloading() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.unloading == 0 {
+		return false
+	}
+	if s.unloading > 0 {
+		s.unloading--
+	}
+	return true
 }
 
 func (s *fakeSystem) Elevated() bool                     { return s.elevated }
@@ -882,5 +896,27 @@ func TestFixConflictOnlyWhileIdle(t *testing.T) {
 	defer h.c.Stop()
 	if _, err := h.c.FixConflict("proxybridge"); !errors.Is(err, ErrRunning) {
 		t.Fatalf("fix while running: %v", err)
+	}
+}
+
+func TestStartWaitsForUnloadingDriver(t *testing.T) {
+	oldWait, oldPoll := driverWait, driverPoll
+	driverWait, driverPoll = 200*time.Millisecond, 5*time.Millisecond
+	defer func() { driverWait, driverPoll = oldWait, oldPoll }()
+
+	h := newHarness(t, nil)
+	h.sys.unloading = 3
+	if _, err := h.c.Start(); err != nil {
+		t.Fatalf("start after the driver unloaded: %v", err)
+	}
+	h.c.Stop()
+
+	h.sys.unloading = -1
+	_, err := h.c.Start()
+	if !errors.Is(err, errDriverUnloading) {
+		t.Fatalf("start with a stuck driver: %v", err)
+	}
+	if len(h.engines) != 1 {
+		t.Fatalf("nothing may start while waiting (%d engines)", len(h.engines))
 	}
 }
