@@ -37,12 +37,28 @@
 
 ### ProxyBridge 冲突一键处理
 
-检测到 ProxyBridge 的后台服务或程序正在运行时，提示条上有 **“停止 ProxyBridge”** 按钮。点击并确认后，程序会结束 ProxyBridge 的进程，并停止 `ProxyBridgeSvc` 服务，然后报告做了什么。ProxyBridge 如果设置了开机启动，下次开机还会运行；不再使用的话，建议卸载它。
+检测到 ProxyBridge 的后台服务或程序正在运行时，提示条上有 **“停止 ProxyBridge”** 按钮。点击并确认后：
+- 程序向 ProxyBridge 的窗口发送它托盘菜单里的“退出”命令，让它自己正常退出（同时停掉它的分流核心），而不是强行结束进程；
+- 再停止 `ProxyBridgeSvc` 服务，然后报告做了什么。
+
+如果 8 秒内它没有退出（例如旧版本或命令行版），会提示你从托盘手动退出。ProxyBridge 如果设置了开机启动，下次开机还会运行；不再使用的话，建议卸载它。
+
+### Chrome 拦截下载（“已屏蔽危险的下载内容”）
+
+第一版测试包（dev-3cb3bff）在 Chrome 中被判为危险下载，而 v1.0.0 没有。对比两版程序里的字符串后发现，v1.0.1 新增了两类恶意软件常见的特征：
+- 直接读取注册表里的浏览器代理设置（`Internet Settings`、`ProxyServer`、`ProxyEnable`、`AutoConfigURL`）。劫持浏览器流量的木马就是改这几项。
+- 按进程名找到并强行结束其他程序（“强杀杀毒软件”类恶意软件的做法）。
+
+修改：
+- 改用浏览器同样使用的系统接口 `WinHttpGetIEProxyConfigForCurrentUser` 读取代理设置；
+- 停止 ProxyBridge 时改为请它正常退出。
+
+改完后，以上字符串都回到了 v1.0.0 的水平。Chrome 的判断是谷歌的启发式规则，并不公开，所以最终以实际下载为准。如果仍被拦截，长期办法是给程序做代码签名，或者向谷歌提交误报。
 
 ## 2. 实测步骤
 
 用 CI 编出的测试包测试。
-1. 在 Actions 页面打开最新一次通过的运行，下载 `MSBOOST-Launcher-dev-xxxxxxx-windows-x64`。
+1. 在 Actions 页面打开最新一次通过的运行，下载 `MSBOOST-Launcher-dev-xxxxxxx-windows-x64`。先确认 Chrome 不再提示“已屏蔽危险的下载内容”（测试 0）。
 2. 解压到新文件夹，把节点配置复制进 `configs`，或者用“导入配置文件”。
 
 ### 测试 1：开着 v2rayN 的系统代理玩游戏（核心验收）
@@ -69,7 +85,7 @@
 
 1. 打开官方 ProxyBridge，让它的服务运行起来。
 2. 打开 MSBOOST 启动器，主页应出现红色提示和“停止 ProxyBridge”按钮。
-3. 点击按钮并确认，应显示“已结束 ProxyBridge 程序…”“已停止 ProxyBridge 后台服务…”，红色提示消失，可以开始加速。
+3. 点击按钮并确认，应显示“已让 ProxyBridge 程序退出”“已停止 ProxyBridge 后台服务…”（只开了服务时只有后一条），红色提示消失，可以开始加速。
 
 ### 测试 6：没有其他代理软件时照常加速
 

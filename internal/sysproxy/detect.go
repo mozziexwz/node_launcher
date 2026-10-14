@@ -40,7 +40,7 @@ type Settings struct {
 func Endpoints(s Settings, pac string, lookup func(host string) []net.IP) []Endpoint {
 	var hosts []hostPort
 	if s.Enabled {
-		hosts = append(hosts, parseProxyServer(s.Server)...)
+		hosts = append(hosts, parseProxyList(s.Server)...)
 	}
 	hosts = append(hosts, parsePAC(pac)...)
 	seen := map[string]bool{}
@@ -73,9 +73,9 @@ type hostPort struct {
 	port uint16
 }
 
-// parseProxyServer reads ProxyServer: either "host:port" for every protocol
+// parseProxyList reads ProxyServer: either "host:port" for every protocol
 // or "scheme=host:port;..." per protocol. Some apps add "http://".
-func parseProxyServer(s string) []hostPort {
+func parseProxyList(s string) []hostPort {
 	var out []hostPort
 	for _, part := range strings.FieldsFunc(s, func(r rune) bool { return r == ';' || r == ' ' }) {
 		if _, value, ok := strings.Cut(part, "="); ok {

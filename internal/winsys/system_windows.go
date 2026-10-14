@@ -27,6 +27,14 @@ const FixProxyBridge = "proxybridge"
 // ProxyBridgePrograms are the official ProxyBridge app's processes.
 var ProxyBridgePrograms = []string{"ProxyBridge.exe", "ProxyBridge_CLI.exe"}
 
+// ProxyBridge 4.x's window title starts with ProxyBridgeTitle, and its tray
+// menu "Exit" is command ProxyBridgeExitCommand (IDM_TRAY_EXIT in
+// gui/res/resource.h). That path stops its core before quitting.
+const (
+	ProxyBridgeTitle       = "ProxyBridge"
+	ProxyBridgeExitCommand = 231
+)
+
 // ConflictInputs are the facts Conflicts reasons about; gathered separately
 // so the rules can be tested without the real system.
 type ConflictInputs struct {

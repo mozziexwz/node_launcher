@@ -75,8 +75,9 @@ func TestAcquireInstance(t *testing.T) {
 	release2()
 }
 
-func TestTerminateProcesses(t *testing.T) {
-	// A copy of ping.exe under a unique name, so nothing else is touched.
+func TestExitProgramsLeavesWindowlessProcesses(t *testing.T) {
+	// A copy of ping.exe under a unique name, so nothing else is touched. It
+	// has no window, so the exit command cannot reach it.
 	name := "msboost-test-dummy.exe"
 	path := filepath.Join(t.TempDir(), name)
 	src, err := os.ReadFile(filepath.Join(os.Getenv("SystemRoot"), "System32", "PING.EXE"))
@@ -90,19 +91,13 @@ func TestTerminateProcesses(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	exited := make(chan error, 1)
-	go func() { exited <- cmd.Wait() }()
+	defer func() { cmd.Process.Kill(); cmd.Wait() }()
 
-	n, err := TerminateProcesses([]string{"MSBOOST-Test-Dummy.exe"})
-	if err != nil || n != 1 {
-		t.Fatalf("ended %d processes, err %v", n, err)
+	exited, running, err := ExitPrograms([]string{"MSBOOST-Test-Dummy.exe"}, "ProxyBridge", ProxyBridgeExitCommand, 200*time.Millisecond)
+	if err != nil || exited != 0 || running != 1 {
+		t.Fatalf("exited %d, running %d, err %v", exited, running, err)
 	}
-	select {
-	case <-exited:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the process is still running")
-	}
-	if n, err := TerminateProcesses([]string{name}); n != 0 || err != nil {
-		t.Fatalf("nothing left to end, got %d, %v", n, err)
+	if exited, running, err := ExitPrograms([]string{"no-such-program.exe"}, "x", 1, time.Second); exited != 0 || running != 0 || err != nil {
+		t.Fatalf("nothing to ask: %d, %d, %v", exited, running, err)
 	}
 }

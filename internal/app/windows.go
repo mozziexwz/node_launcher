@@ -3,6 +3,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -121,12 +122,17 @@ func (windowsSystem) FixConflict(fix string) ([]string, error) {
 		return nil, fmt.Errorf("未知的冲突处理方式：%q", fix)
 	}
 	var report []string
-	n, err := winsys.TerminateProcesses(winsys.ProxyBridgePrograms)
-	if n > 0 {
-		report = append(report, fmt.Sprintf("已结束 ProxyBridge 程序（%d 个进程）", n))
+	// Ask it to exit the way its tray menu does, which also stops its core.
+	exited, running, err := winsys.ExitPrograms(winsys.ProxyBridgePrograms,
+		winsys.ProxyBridgeTitle, winsys.ProxyBridgeExitCommand, 8*time.Second)
+	if exited > 0 {
+		report = append(report, "已让 ProxyBridge 程序退出")
 	}
 	if err != nil {
-		return report, fmt.Errorf("无法结束 ProxyBridge 程序：%w", err)
+		return report, fmt.Errorf("无法让 ProxyBridge 退出：%w", err)
+	}
+	if running > 0 {
+		return report, errors.New("ProxyBridge 没有退出。请在它的托盘图标上右键选择“退出”（命令行版请直接关闭窗口），然后重试")
 	}
 	switch state, _ := redirector.ServiceState(redirector.ProxyBridgeService); state {
 	case "RUNNING", "START_PENDING", "PAUSED", "CONTINUE_PENDING", "PAUSE_PENDING":

@@ -79,7 +79,7 @@ export function Home(props: {
 
     const fixConflict = async (fix: string) => {
         if (!await props.confirm('停止 ProxyBridge',
-            'MSBOOST 会结束 ProxyBridge 程序，并停止它的后台服务（ProxyBridgeSvc）。' +
+            'MSBOOST 会让 ProxyBridge 退出（和它托盘菜单里的“退出”一样），并停止它的后台服务（ProxyBridgeSvc）。' +
             '如果它设置了开机启动，下次开机还会运行；不再使用的话，建议卸载 ProxyBridge。确定继续吗？', '停止', true)) {
             return
         }

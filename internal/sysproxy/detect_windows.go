@@ -9,11 +9,10 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unsafe"
 
-	"golang.org/x/sys/windows/registry"
+	"golang.org/x/sys/windows"
 )
-
-const internetSettings = `Software\Microsoft\Windows\CurrentVersion\Internet Settings`
 
 // Current returns the endpoints of the current user's system proxy, reading
 // the PAC script when one is configured. It returns nil when none is set.
@@ -26,19 +25,43 @@ func Current() []Endpoint {
 	return Endpoints(s, pac, lookup)
 }
 
-// ReadSettings reads the proxy values every "system proxy" app writes.
+var (
+	modwinhttp           = windows.NewLazySystemDLL("winhttp.dll")
+	procGetIEProxyConfig = modwinhttp.NewProc("WinHttpGetIEProxyConfigForCurrentUser")
+	modkernel32          = windows.NewLazySystemDLL("kernel32.dll")
+	procGlobalFree       = modkernel32.NewProc("GlobalFree")
+)
+
+// ieProxyConfig is WINHTTP_CURRENT_USER_IE_PROXY_CONFIG.
+type ieProxyConfig struct {
+	autoDetect    int32
+	autoConfigURL *uint16
+	proxy         *uint16
+	proxyBypass   *uint16
+}
+
+// ReadSettings reads the current user's proxy settings, which every "system
+// proxy" app sets, through WinHTTP as browsers do. The proxy list is only
+// returned while the manual proxy is switched on.
 func ReadSettings() Settings {
-	k, err := registry.OpenKey(registry.CURRENT_USER, internetSettings, registry.QUERY_VALUE)
-	if err != nil {
+	var c ieProxyConfig
+	if r, _, _ := procGetIEProxyConfig.Call(uintptr(unsafe.Pointer(&c))); r == 0 {
 		return Settings{}
 	}
-	defer k.Close()
 	var s Settings
-	if v, _, err := k.GetIntegerValue("ProxyEnable"); err == nil {
-		s.Enabled = v != 0
+	if c.proxy != nil {
+		s.Enabled = true
+		s.Server = windows.UTF16PtrToString(c.proxy)
 	}
-	s.Server, _, _ = k.GetStringValue("ProxyServer")
-	s.PACURL, _, _ = k.GetStringValue("AutoConfigURL")
+	if c.autoConfigURL != nil {
+		s.PACURL = windows.UTF16PtrToString(c.autoConfigURL)
+	}
+	// WinHTTP allocates the strings; the caller frees them with GlobalFree.
+	for _, p := range []*uint16{c.autoConfigURL, c.proxy, c.proxyBypass} {
+		if p != nil {
+			procGlobalFree.Call(uintptr(unsafe.Pointer(p)))
+		}
+	}
 	return s
 }
 
@@ -56,7 +79,7 @@ func fetchPAC(raw string) string {
 	case "file":
 		path := strings.TrimPrefix(u.Path, "/")
 		if u.Host != "" {
-			path = `\` + u.Host + `\` + path
+			path = `\\` + u.Host + `\` + path
 		}
 		f, err := os.Open(path)
 		if err != nil {
