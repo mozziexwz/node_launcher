@@ -1,7 +1,7 @@
 # MSBOOST 一体化启动器开发规划
 
 > 仓库：<https://github.com/mozziexwz/node_launcher>
-> 日期：2026-10-12（2026-10-14 更新）　状态：M0 已完成（`docs/m0/README.md`）；M1 已完成并通过真实游戏验收（`docs/m1/README.md`）；M2 界面已通过实测验收并合并（`docs/m2/README.md`）；M3 打包已通过实测验收（`docs/m3/README.md`）；M4 改为虚拟机长时间测试，已通过；首个正式版本为 v1.0.0；M5 暂不做。v1.0.1 兼容其他代理软件的系统代理（§4.8），已通过实测验收（`docs/v1.0.1/README.md`）。
+> 日期：2026-10-12（2026-10-16 更新）　状态：M0 已完成（`docs/m0/README.md`）；M1 已完成并通过真实游戏验收（`docs/m1/README.md`）；M2 界面已通过实测验收并合并（`docs/m2/README.md`）；M3 打包已通过实测验收（`docs/m3/README.md`）；M4 改为虚拟机长时间测试，已通过；首个正式版本为 v1.0.0；M5 暂不做。v1.0.1 兼容其他代理软件的系统代理（§4.8），已通过实测验收（`docs/v1.0.1/README.md`）。v1.0.2 修复 Steam 版登录窗口黑屏，加速名单增加 2 项（§4.3，`docs/v1.0.2/README.md`）。
 >
 > 依据：
 > - `legacy/MSBOOST启动器_全程TCP测速.bat`，以及 `docs/MSBOOST全程TCP测速整改计划.md`
@@ -174,12 +174,16 @@ MapleStory.exe ──TCP──▶ [WinDivert 驱动] ──改写──▶ Proxy
 
 ### 4.3 游戏设置
 
-- **加速进程**：默认原样沿用你实测通过的 ProxyBridge 配置，共 24 项：
-  - 冒险岛与 MapleStory Worlds：`MapleStory.exe`、`msw.exe`
-  - Nexon 登录器与组件：`nexon_launcher.exe`、`nexon_client.exe`、`nexon_runtime.exe`、`NexonPlug.exe`、`nxsteam.exe`、`NGM.exe`、`NGM64.exe`、`NMService.exe`、`SIG.exe`
+- **加速进程**：默认原样沿用你实测通过的 ProxyBridge 配置，共 24 项；v1.0.2 增加 2 项，现为 26 项：
+  - 冒险岛与 MapleStory Worlds：`MapleStory.exe`、`msw.exe`、`MapleBrowser_WZ2.exe`（v1.0.2）
+  - Nexon 登录器与组件：`nexon_launcher.exe`、`nexon_client.exe`、`nexon_runtime.exe`、`NexonPlug.exe`、`nxsteam.exe`、`NGM.exe`、`NGM64.exe`、`NMService.exe`、`SIG.exe`、`DwarfAxe.exe`（v1.0.2）
   - 反作弊：`BlackCipher64.aes`、`BlackCall64.aes`、`NGClient64.aes`、`NGCLIENT.AES`
   - 崩溃上报：`UnityCrashHandler64.exe`、`CrashReportClient.exe`
   - 私服客户端：`MapleRoyals.exe`、`mr.dll`、`MapleLegends.exe`、`DreamMS.exe`、`Kaizen v92.exe`、`Kaizenv92.exe`、`Fantasia.exe`
+
+  v1.0.2 增加的两项是游戏自带的网页组件。网页由这些子进程加载和联网，而不是 `MapleStory.exe`：
+  - `DwarfAxe.exe`（`appdata\NxOverlay`）负责 Steam 版的 Nexon 登录窗口，之前漏掉，这个窗口就一直黑屏；
+  - `MapleBrowser_WZ2.exe` 是游戏内浏览器。
 
   清单固定在程序里（`internal/profiles`），**用户不能修改**；需要调整时随新版本发布。分流核心按分号分隔的清单匹配进程名，不区分大小写。
 - **可选加速**：两个开关，默认关闭。
@@ -513,7 +517,7 @@ node_launcher/
 
 已确认（2026-10-12）：
 
-1. 进程清单与协议：以 `MapleStory.pbprofile` 为准，共 24 项，TCP + UDP（§4.3）。
+1. 进程清单与协议：以 `MapleStory.pbprofile` 为准，共 24 项，TCP + UDP（§4.3）。v1.0.2 增加 2 项网页组件，见 §4.3。
 2. 程序文件名 `MSBOOST-Launcher.exe`，窗口标题“MSBOOST 启动器”（D9）。
 3. 首版需要托盘图标（D10，M0 第 9 项）。
 

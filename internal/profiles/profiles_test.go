@@ -1,6 +1,7 @@
 package profiles
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -10,8 +11,15 @@ func TestDefaultMapleStory(t *testing.T) {
 	if err := g.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if len(g.Processes) != 24 {
-		t.Fatalf("got %d processes, want the 24 tested entries", len(g.Processes))
+	if len(g.Processes) != 26 {
+		t.Fatalf("got %d processes, want the 24 tested entries plus 2 web helpers", len(g.Processes))
+	}
+	// The Steam version's login window is drawn and networked by DwarfAxe.exe;
+	// without it the window stays blank.
+	for _, p := range []string{"DwarfAxe.exe", "MapleBrowser_WZ2.exe"} {
+		if !slices.Contains(g.Processes, p) {
+			t.Errorf("%s missing from the list", p)
+		}
 	}
 	list := g.ProcessList()
 	if strings.HasSuffix(list, ";") || !strings.Contains(list, "Kaizen v92.exe;Kaizenv92.exe") {

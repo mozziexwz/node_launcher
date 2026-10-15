@@ -33,13 +33,20 @@ type Game struct {
 // DefaultMapleStory is the process list from the user's ProxyBridge profile
 // that passed real MapleStory testing on 2026-10-12 (login, channels, channel
 // changes, anti-cheat quiet). Entries are kept verbatim, including mr.dll.
+//
+// v1.0.2 adds the game's two web helpers. Their pages load in those helper
+// processes, not in MapleStory.exe, so the helpers must be listed themselves:
+//   - DwarfAxe.exe (appdata\NxOverlay) is the CEF subprocess behind the Nexon
+//     login window that the Steam version shows. Unlisted, the window stayed
+//     blank because it connected directly instead of through the node.
+//   - MapleBrowser_WZ2.exe is the in-game web browser.
 func DefaultMapleStory() Game {
 	return Game{
 		Name: "MapleStory",
 		Processes: []string{
-			"MapleStory.exe", "msw.exe",
+			"MapleStory.exe", "msw.exe", "MapleBrowser_WZ2.exe",
 			"nexon_launcher.exe", "nexon_client.exe", "nexon_runtime.exe", "NexonPlug.exe",
-			"nxsteam.exe", "NGM.exe", "NGM64.exe", "NMService.exe", "SIG.exe",
+			"nxsteam.exe", "NGM.exe", "NGM64.exe", "NMService.exe", "SIG.exe", "DwarfAxe.exe",
 			"BlackCipher64.aes", "BlackCall64.aes", "NGClient64.aes", "NGCLIENT.AES",
 			"UnityCrashHandler64.exe", "CrashReportClient.exe",
 			"MapleRoyals.exe", "mr.dll", "MapleLegends.exe", "DreamMS.exe",
@@ -67,9 +74,9 @@ type Group struct {
 // Together the groups list every process exactly once.
 func DisplayGroups() []Group {
 	return []Group{
-		{Name: "MapleStory", Processes: []string{"MapleStory.exe", "msw.exe"}},
+		{Name: "MapleStory", Processes: []string{"MapleStory.exe", "msw.exe", "MapleBrowser_WZ2.exe"}},
 		{Name: "Nexon 登录器与组件", Processes: []string{"nexon_launcher.exe", "nexon_client.exe", "nexon_runtime.exe",
-			"NexonPlug.exe", "nxsteam.exe", "NGM.exe", "NGM64.exe", "NMService.exe", "SIG.exe"}},
+			"NexonPlug.exe", "nxsteam.exe", "NGM.exe", "NGM64.exe", "NMService.exe", "SIG.exe", "DwarfAxe.exe"}},
 		{Name: "反作弊", Processes: []string{"BlackCipher64.aes", "BlackCall64.aes", "NGClient64.aes", "NGCLIENT.AES"}},
 		{Name: "崩溃上报", Processes: []string{"UnityCrashHandler64.exe", "CrashReportClient.exe"}},
 		{Name: "其他客户端", Processes: []string{"MapleRoyals.exe", "mr.dll", "MapleLegends.exe", "DreamMS.exe",
