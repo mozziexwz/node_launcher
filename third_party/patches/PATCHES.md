@@ -14,5 +14,6 @@
 | P1 | `0001-firewall-rule-name.patch` | 防火墙入站规则从 `ProxyBridge relay <哈希>` 改为 `MSBOOST relay <哈希>`，说明文字同步修改 | 已生效（M1）。专用网络实测不需要这条规则；公用网络和 VPN 网卡需要它（待 M4 实测），因此保留 |
 | P2 | — | 没有 UDP 规则时不截获 UDP | 由性能数据决定 |
 | P3 | — | 导出中继端口的占用状态，或允许自定义端口 | 按需 |
+| P4 | `0002-localhost-proxy-ports.patch` | 新增 `ProxyBridge_SetLocalhostProxyPorts`：列出的本机 TCP 端口不再一律直连，可以按规则代理。启动器把 Windows 系统代理（v2rayN、Clash 等）的端口传进来，游戏发往系统代理的连接就会转到启动器自己处理，而不是交给那些软件。UDP 和其他本机端口不受影响 | 已生效（v1.0.1） |
 
 规则名的哈希算法未改动，因此 `internal/redirector.FirewallRuleNames` 能同时算出自编核心和官方核心的规则名。“清理”功能会把两个都删除。

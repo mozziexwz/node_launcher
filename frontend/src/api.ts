@@ -13,6 +13,7 @@ export interface Status {
     download: number
     uploadRate: number // bytes per second
     downloadRate: number
+    systemProxy: string[] | null // system proxy endpoints being taken over
     lastError: string
     addons: Record<string, boolean>
 }
@@ -41,6 +42,7 @@ export interface Group {
 export interface Conflict {
     message: string
     blocking: boolean
+    fix: string // a fix fixConflict can apply, or ""
 }
 
 export interface Overview {
@@ -127,6 +129,7 @@ export const api = {
     recentLogs: async () => plain<LogLine[]>(await Go.RecentLogs()) ?? [],
     exportDiagnostics: () => Go.ExportDiagnostics(),
     cleanup: async () => (await Go.Cleanup()) ?? [],
+    fixConflict: async (fix: string) => (await Go.FixConflict(fix)) ?? [],
     about: async () => plain<About>(await Go.About()),
     openURL: (url: string) => Go.OpenURL(url),
     hideToTray: () => Go.HideToTray(),

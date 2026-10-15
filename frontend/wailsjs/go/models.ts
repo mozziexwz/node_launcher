@@ -174,6 +174,7 @@ export namespace main {
 	export class ConflictDTO {
 	    message: string;
 	    blocking: boolean;
+	    fix: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ConflictDTO(source);
@@ -183,6 +184,7 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.message = source["message"];
 	        this.blocking = source["blocking"];
+	        this.fix = source["fix"];
 	    }
 	}
 	export class GroupDTO {
@@ -240,6 +242,7 @@ export namespace main {
 	    download: number;
 	    uploadRate: number;
 	    downloadRate: number;
+	    systemProxy: string[];
 	    lastError: string;
 	    addons: Record<string, boolean>;
 	
@@ -256,6 +259,7 @@ export namespace main {
 	        this.download = source["download"];
 	        this.uploadRate = source["uploadRate"];
 	        this.downloadRate = source["downloadRate"];
+	        this.systemProxy = source["systemProxy"];
 	        this.lastError = source["lastError"];
 	        this.addons = source["addons"];
 	    }

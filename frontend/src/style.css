@@ -496,6 +496,16 @@ nav {
     color: var(--green);
 }
 
+.banner-action {
+    flex-shrink: 0;
+    padding: 4px 12px;
+    font-size: 12.5px;
+    font-weight: 600;
+    background: #fff;
+    border-color: currentColor;
+    color: inherit;
+}
+
 .banner .link {
     color: inherit;
     font-weight: 600;
@@ -550,6 +560,12 @@ nav {
 
 .hero-stats b + b {
     margin-left: 10px;
+}
+
+.hero-note {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--faint);
 }
 
 .hero-button {

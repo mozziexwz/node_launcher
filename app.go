@@ -356,6 +356,10 @@ func (a *App) ExportDiagnostics() (string, error) {
 	return path, nil
 }
 
+// FixConflict resolves a conflict the launcher can fix itself (see
+// ConflictDTO.Fix) and reports what it did.
+func (a *App) FixConflict(fix string) ([]string, error) { return a.ctl.FixConflict(fix) }
+
 // Cleanup removes the driver service, firewall rules and runtime files.
 func (a *App) Cleanup() ([]string, error) { return a.ctl.Cleanup(a.exePath) }
 

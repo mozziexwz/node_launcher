@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 	"unicode/utf16"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -85,6 +86,50 @@ func StopService(name string, timeout time.Duration) (string, error) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+}
+
+// ServiceUnloading reports whether a service still exists but is on its way
+// out: stopping, or stopped and marked for deletion. The SCM disables a
+// service marked for deletion, so starting it fails with
+// ERROR_SERVICE_DISABLED (1058) until its last handle closes and it
+// disappears. WinDivert marks its own service for deletion as soon as it
+// starts, so a RUNNING driver is still usable and does not count.
+func ServiceUnloading(name string) bool {
+	scm, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_CONNECT)
+	if err != nil {
+		return false
+	}
+	defer windows.CloseServiceHandle(scm)
+	svc, err := openService(scm, name, windows.SERVICE_QUERY_STATUS|windows.SERVICE_QUERY_CONFIG)
+	if err != nil {
+		return false
+	}
+	defer windows.CloseServiceHandle(svc)
+	var status windows.SERVICE_STATUS
+	if err := windows.QueryServiceStatus(svc, &status); err != nil {
+		return false
+	}
+	switch status.CurrentState {
+	case windows.SERVICE_STOP_PENDING:
+		return true
+	case windows.SERVICE_STOPPED:
+		return startDisabled(svc)
+	}
+	return false
+}
+
+func startDisabled(svc windows.Handle) bool {
+	var need uint32
+	windows.QueryServiceConfig(svc, nil, 0, &need)
+	if need == 0 {
+		return false
+	}
+	buf := make([]uint64, (need+7)/8) // 8-byte aligned for the struct
+	cfg := (*windows.QUERY_SERVICE_CONFIG)(unsafe.Pointer(&buf[0]))
+	if err := windows.QueryServiceConfig(svc, cfg, uint32(len(buf)*8), &need); err != nil {
+		return false
+	}
+	return cfg.StartType == windows.SERVICE_DISABLED
 }
 
 func openService(scm windows.Handle, name string, access uint32) (windows.Handle, error) {

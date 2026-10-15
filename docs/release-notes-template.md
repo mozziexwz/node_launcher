@@ -1,5 +1,7 @@
 ## MSBOOST 启动器 {{VERSION}}
 
+**系统要求**：64 位 Windows 10 或 Windows 11（不支持 32 位系统和 ARM 版 Windows）。
+
 ### 下载与使用
 
 1. 下载 `MSBOOST-Launcher-{{VERSION}}-windows-x64.zip`，解压到一个新文件夹，例如 `D:\MSBOOST\`。

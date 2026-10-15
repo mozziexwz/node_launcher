@@ -4,8 +4,12 @@ package winsys
 
 import (
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestConflicts(t *testing.T) {
@@ -17,7 +21,7 @@ func TestConflicts(t *testing.T) {
 	}{
 		{"clean", ConflictInputs{ProxyBridgeServiceState: "STOPPED"}, nil, false},
 		{"service running", ConflictInputs{ProxyBridgeServiceState: "RUNNING", RelayPortsBusy: []string{"TCP 34010（0.0.0.0）"}},
-			[]string{"sc stop ProxyBridgeSvc"}, true},
+			[]string{"ProxyBridge 的后台服务"}, true},
 		{"gui running", ConflictInputs{RunningProcesses: []string{"ProxyBridge.exe"}}, []string{"ProxyBridge 正在运行"}, true},
 		{"netch is only a warning", ConflictInputs{RunningProcesses: []string{"netch.EXE"}}, []string{"Netch"}, false},
 		{"port held by something else", ConflictInputs{ProxyBridgeServiceState: "NOT_INSTALLED", RelayPortsBusy: []string{"TCP 34010（::）"}},
@@ -69,4 +73,31 @@ func TestAcquireInstance(t *testing.T) {
 		t.Fatalf("acquire after release: %v", err)
 	}
 	release2()
+}
+
+func TestExitProgramsLeavesWindowlessProcesses(t *testing.T) {
+	// A copy of ping.exe under a unique name, so nothing else is touched. It
+	// has no window, so the exit command cannot reach it.
+	name := "msboost-test-dummy.exe"
+	path := filepath.Join(t.TempDir(), name)
+	src, err := os.ReadFile(filepath.Join(os.Getenv("SystemRoot"), "System32", "PING.EXE"))
+	if err != nil {
+		t.Skipf("ping.exe not available: %v", err)
+	}
+	if err := os.WriteFile(path, src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(path, "-n", "30", "127.0.0.1")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { cmd.Process.Kill(); cmd.Wait() }()
+
+	exited, running, err := ExitPrograms([]string{"MSBOOST-Test-Dummy.exe"}, "ProxyBridge", ProxyBridgeExitCommand, 200*time.Millisecond)
+	if err != nil || exited != 0 || running != 1 {
+		t.Fatalf("exited %d, running %d, err %v", exited, running, err)
+	}
+	if exited, running, err := ExitPrograms([]string{"no-such-program.exe"}, "x", 1, time.Second); exited != 0 || running != 0 || err != nil {
+		t.Fatalf("nothing to ask: %d, %d, %v", exited, running, err)
+	}
 }

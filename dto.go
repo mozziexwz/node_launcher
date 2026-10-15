@@ -21,6 +21,7 @@ type StatusDTO struct {
 	Download     int64           `json:"download"`
 	UploadRate   int64           `json:"uploadRate"` // bytes per second
 	DownloadRate int64           `json:"downloadRate"`
+	SystemProxy  []string        `json:"systemProxy"` // system proxy endpoints taken over
 	LastError    string          `json:"lastError"`
 	Addons       map[string]bool `json:"addons"`
 }
@@ -49,6 +50,7 @@ type GroupDTO struct {
 type ConflictDTO struct {
 	Message  string `json:"message"`
 	Blocking bool   `json:"blocking"`
+	Fix      string `json:"fix"` // a fix FixConflict can apply, or ""
 }
 
 type OverviewDTO struct {
@@ -119,7 +121,8 @@ func toStatusDTO(st app.Status) StatusDTO {
 	dto := StatusDTO{
 		State: string(st.State), Config: st.Config,
 		Upload: st.Upload, Download: st.Download, UploadRate: st.UploadRate, DownloadRate: st.DownloadRate,
-		LastError: st.LastError, Addons: st.Addons,
+		SystemProxy: st.SystemProxy,
+		LastError:   st.LastError, Addons: st.Addons,
 	}
 	if !st.Since.IsZero() {
 		dto.SinceUnix = st.Since.UnixMilli()
@@ -158,7 +161,7 @@ func toGroupDTOs() []GroupDTO {
 func toConflictDTOs(list []app.Conflict) []ConflictDTO {
 	out := make([]ConflictDTO, 0, len(list))
 	for _, c := range list {
-		out = append(out, ConflictDTO{Message: c.Message, Blocking: c.Blocking})
+		out = append(out, ConflictDTO{Message: c.Message, Blocking: c.Blocking, Fix: c.Fix})
 	}
 	return out
 }

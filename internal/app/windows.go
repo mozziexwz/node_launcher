@@ -3,6 +3,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/mozziexwz/node_launcher/internal/logx"
 	"github.com/mozziexwz/node_launcher/internal/redirector"
 	"github.com/mozziexwz/node_launcher/internal/store"
+	"github.com/mozziexwz/node_launcher/internal/sysproxy"
 	"github.com/mozziexwz/node_launcher/internal/winsys"
 )
 
@@ -53,6 +55,7 @@ func NewWindows(layout store.Layout, log *logx.Logger, corePath string, prepareR
 			return coreAdapter{core}, nil
 		},
 		PrepareRuntime: prepareRuntime,
+		SystemProxies:  sysproxy.Current,
 		System:         windowsSystem{},
 	})
 }
@@ -75,13 +78,31 @@ func (a coreAdapter) AddProxyRule(processes string, proxyID uint32) (uint32, err
 	return a.core.AddRule(processes, "*", "*", "*", redirector.ProtocolBoth, redirector.ActionProxy, proxyID)
 }
 
-func (a coreAdapter) DeleteRule(id uint32) bool { return a.core.DeleteRule(id) }
-func (a coreAdapter) Start() bool               { return a.core.Start() }
-func (a coreAdapter) Stop() bool                { return a.core.Stop() }
+func (a coreAdapter) AddTCPRule(processes, hosts, ports string, proxyID uint32) (uint32, error) {
+	return a.core.AddRule(processes, hosts, ports, "*", redirector.ProtocolTCP, redirector.ActionProxy, proxyID)
+}
+
+func (a coreAdapter) EditTCPRule(id uint32, processes, hosts, ports string, proxyID uint32) error {
+	return a.core.EditRule(id, processes, hosts, ports, "*", redirector.ProtocolTCP, redirector.ActionProxy, proxyID)
+}
+
+func (a coreAdapter) EnableRule(id uint32) bool  { return a.core.EnableRule(id) }
+func (a coreAdapter) DisableRule(id uint32) bool { return a.core.DisableRule(id) }
+func (a coreAdapter) DeleteRule(id uint32) bool  { return a.core.DeleteRule(id) }
+
+func (a coreAdapter) SetLocalhostProxyPorts(ports []uint16) error {
+	return a.core.SetLocalhostProxyPorts(ports)
+}
+func (a coreAdapter) Start() bool { return a.core.Start() }
+func (a coreAdapter) Stop() bool  { return a.core.Stop() }
 
 type windowsSystem struct{}
 
 func (windowsSystem) Elevated() bool { return winsys.IsElevated() }
+
+func (windowsSystem) DriverUnloading() bool {
+	return redirector.ServiceUnloading(redirector.WinDivertService)
+}
 
 func (windowsSystem) Conflicts() []Conflict {
 	state, _ := redirector.ServiceState(redirector.ProxyBridgeService)
@@ -93,9 +114,41 @@ func (windowsSystem) Conflicts() []Conflict {
 	})
 	out := make([]Conflict, len(found))
 	for i, f := range found {
-		out[i] = Conflict{Message: f.Message, Blocking: f.Blocking}
+		out[i] = Conflict{Message: f.Message, Blocking: f.Blocking, Fix: f.Fix}
 	}
 	return out
+}
+
+// FixConflict ends the official ProxyBridge app and stops its service; they
+// hold the relay ports and the packet driver the launcher needs.
+func (windowsSystem) FixConflict(fix string) ([]string, error) {
+	if fix != winsys.FixProxyBridge {
+		return nil, fmt.Errorf("未知的冲突处理方式：%q", fix)
+	}
+	var report []string
+	// Ask it to exit the way its tray menu does, which also stops its core.
+	exited, running, err := winsys.ExitPrograms(winsys.ProxyBridgePrograms,
+		winsys.ProxyBridgeTitle, winsys.ProxyBridgeExitCommand, 8*time.Second)
+	if exited > 0 {
+		report = append(report, "已让 ProxyBridge 程序退出")
+	}
+	if err != nil {
+		return report, fmt.Errorf("无法让 ProxyBridge 退出：%w", err)
+	}
+	if running > 0 {
+		return report, errors.New("ProxyBridge 没有退出。请在它的托盘图标上右键选择“退出”（命令行版请直接关闭窗口），然后重试")
+	}
+	switch state, _ := redirector.ServiceState(redirector.ProxyBridgeService); state {
+	case "RUNNING", "START_PENDING", "PAUSED", "CONTINUE_PENDING", "PAUSE_PENDING":
+		if state, err := redirector.StopService(redirector.ProxyBridgeService, 15*time.Second); err != nil {
+			return report, fmt.Errorf("无法停止 ProxyBridge 后台服务（%s）：%w", state, err)
+		}
+		report = append(report, "已停止 ProxyBridge 后台服务（ProxyBridgeSvc）")
+	}
+	if len(report) == 0 {
+		report = append(report, "ProxyBridge 已不在运行")
+	}
+	return report, nil
 }
 
 func (windowsSystem) RunningProcesses(names []string) []string {
