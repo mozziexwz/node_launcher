@@ -11,12 +11,12 @@ func TestDefaultMapleStory(t *testing.T) {
 	if err := g.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if len(g.Processes) != 26 {
-		t.Fatalf("got %d processes, want the 24 tested entries plus 2 web helpers", len(g.Processes))
+	if len(g.Processes) != 31 {
+		t.Fatalf("got %d processes, want the 24 tested entries plus 7 added in v1.0.2", len(g.Processes))
 	}
-	// The Steam version's login window is drawn and networked by DwarfAxe.exe;
-	// without it the window stays blank.
-	for _, p := range []string{"DwarfAxe.exe", "MapleBrowser_WZ2.exe"} {
+	// Without ms-launcher.exe the Steam version's login window stays black.
+	for _, p := range []string{"ms-launcher.exe", "DwarfAxe.exe", "MapleBrowser_WZ2.exe",
+		"grap-core64.aes", "grap-communicator64.aes", "grap-updater.aes", "NGService.exe"} {
 		if !slices.Contains(g.Processes, p) {
 			t.Errorf("%s missing from the list", p)
 		}

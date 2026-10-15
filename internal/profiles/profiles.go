@@ -34,20 +34,26 @@ type Game struct {
 // that passed real MapleStory testing on 2026-10-12 (login, channels, channel
 // changes, anti-cheat quiet). Entries are kept verbatim, including mr.dll.
 //
-// v1.0.2 adds the game's two web helpers. Their pages load in those helper
-// processes, not in MapleStory.exe, so the helpers must be listed themselves:
-//   - DwarfAxe.exe (appdata\NxOverlay) is the CEF subprocess behind the Nexon
-//     login window that the Steam version shows. Unlisted, the window stayed
-//     blank because it connected directly instead of through the node.
-//   - MapleBrowser_WZ2.exe is the in-game web browser.
+// v1.0.2 adds seven processes the profile missed, found in the Steam install:
+//   - ms-launcher.exe (mslauncher folder) is the Steam version's Electron
+//     launcher. It shows the Nexon login window, and its helper processes share
+//     its name. Unlisted, that window stayed black: it connected directly
+//     instead of through the node.
+//   - DwarfAxe.exe (NxOverlay, CEF) and MapleBrowser_WZ2.exe load the game's
+//     web pages, which connect from these helpers rather than MapleStory.exe.
+//   - grap-*.aes and NGService.exe are NGS-X, the anti-cheat of MapleStory
+//     Classic World (MSCW folder). Its game is also named MapleStory.exe, so it
+//     was already listed; the main game's anti-cheat (BlackCipher) always was.
 func DefaultMapleStory() Game {
 	return Game{
 		Name: "MapleStory",
 		Processes: []string{
 			"MapleStory.exe", "msw.exe", "MapleBrowser_WZ2.exe",
 			"nexon_launcher.exe", "nexon_client.exe", "nexon_runtime.exe", "NexonPlug.exe",
-			"nxsteam.exe", "NGM.exe", "NGM64.exe", "NMService.exe", "SIG.exe", "DwarfAxe.exe",
+			"nxsteam.exe", "NGM.exe", "NGM64.exe", "NMService.exe", "SIG.exe",
+			"ms-launcher.exe", "DwarfAxe.exe",
 			"BlackCipher64.aes", "BlackCall64.aes", "NGClient64.aes", "NGCLIENT.AES",
+			"grap-core64.aes", "grap-communicator64.aes", "grap-updater.aes", "NGService.exe",
 			"UnityCrashHandler64.exe", "CrashReportClient.exe",
 			"MapleRoyals.exe", "mr.dll", "MapleLegends.exe", "DreamMS.exe",
 			"Kaizen v92.exe", "Kaizenv92.exe", "Fantasia.exe",
@@ -76,8 +82,10 @@ func DisplayGroups() []Group {
 	return []Group{
 		{Name: "MapleStory", Processes: []string{"MapleStory.exe", "msw.exe", "MapleBrowser_WZ2.exe"}},
 		{Name: "Nexon 登录器与组件", Processes: []string{"nexon_launcher.exe", "nexon_client.exe", "nexon_runtime.exe",
-			"NexonPlug.exe", "nxsteam.exe", "NGM.exe", "NGM64.exe", "NMService.exe", "SIG.exe", "DwarfAxe.exe"}},
-		{Name: "反作弊", Processes: []string{"BlackCipher64.aes", "BlackCall64.aes", "NGClient64.aes", "NGCLIENT.AES"}},
+			"NexonPlug.exe", "nxsteam.exe", "NGM.exe", "NGM64.exe", "NMService.exe", "SIG.exe",
+			"ms-launcher.exe", "DwarfAxe.exe"}},
+		{Name: "反作弊", Processes: []string{"BlackCipher64.aes", "BlackCall64.aes", "NGClient64.aes", "NGCLIENT.AES",
+			"grap-core64.aes", "grap-communicator64.aes", "grap-updater.aes", "NGService.exe"}},
 		{Name: "崩溃上报", Processes: []string{"UnityCrashHandler64.exe", "CrashReportClient.exe"}},
 		{Name: "其他客户端", Processes: []string{"MapleRoyals.exe", "mr.dll", "MapleLegends.exe", "DreamMS.exe",
 			"Kaizen v92.exe", "Kaizenv92.exe", "Fantasia.exe"}},
