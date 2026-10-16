@@ -91,11 +91,11 @@
 
 ### 修复
 
-在节点端修复，启动器不用改：在节点的放行清单 `msboost-direct` 中加入 `DOMAIN,www.gstatic.com`。
-- 只放行这一个域名，不放行整个 `gstatic.com` 或 `google.com`。
-- 放行清单在 GFW 规则之前生效。
+在节点端修复，启动器不用改。完整的复查结果和要加的规则见本目录的 `节点放行清单整改计划.md`：
+- 必须：在放行清单中加入 `DOMAIN,www.gstatic.com`，只放行这一个主机；
+- 建议：再加入 `DOMAIN-SUFFIX,recaptcha.net` 和 `DOMAIN-SUFFIX,nexonstatic.com`，以防它们以后被列入 GFW 列表。
 
-用 Google、Facebook 等第三方账号登录时，还需要访问 `accounts.google.com`、`www.facebook.com` 等域名，这些仍会被节点拒绝。加速时请用 Nexon 账号和密码登录。
+Google、Facebook、X 等第三方账号登录要访问的域名仍会被节点拒绝；Apple 账号登录不受影响。加速时请用 Nexon 账号密码或 Apple 账号登录。
 
 ### 另一个现象：节点连接短暂中断
 
@@ -128,3 +128,12 @@
 ### 如果还有问题
 
 请记下卡在哪一步并截图，同时附上日志（`logs\launcher-日期.log`）。日志不要公开发布。
+
+## 6. 实测结果
+
+| 测试包 | 日期 | 结果 |
+|---|---|---|
+| dev-022fcb9 | 2026-10-16 | 本机加速三次都正常，其中两次分别连续运行约 8 小时和 7 小时 |
+| dev-620199e（30 项名单） | 2026-10-17 | 实测通过 |
+
+测试 4（节点放行 `www.gstatic.com` 后的手动登录）等节点更新后再做。
