@@ -30,33 +30,38 @@ type Game struct {
 	TestPort          int
 }
 
-// DefaultMapleStory is the process list from the user's ProxyBridge profile
-// that passed real MapleStory testing on 2026-10-12 (login, channels, channel
-// changes, anti-cheat quiet). Entries are kept verbatim, including mr.dll.
+// DefaultMapleStory is the process list. It began as the user's ProxyBridge
+// profile that passed real MapleStory testing on 2026-10-12 (login, channels,
+// channel changes, anti-cheat quiet), kept verbatim including mr.dll.
 //
-// v1.0.2 adds seven processes the profile missed, found in the Steam install:
+// v1.0.2 follows the list the user reviewed: groups reordered, Kaizen and
+// Fantasia dropped, and nine processes added from the Steam and Nexon installs:
 //   - ms-launcher.exe (mslauncher folder) is the Steam version's Electron
 //     launcher. It shows the Nexon login window, and its helper processes share
 //     its name. Unlisted, that window stayed black: it connected directly
 //     instead of through the node.
-//   - DwarfAxe.exe (NxOverlay, CEF) and MapleBrowser_WZ2.exe load the game's
-//     web pages, which connect from these helpers rather than MapleStory.exe.
+//   - MapleBrowser_WZ2.exe, DwarfAxe.exe (NxOverlay) and MapleStory Worlds'
+//     cefhelper.exe load web pages, which connect from these helpers rather
+//     than from the game.
+//   - BlackXchg.aes is a BlackCipher process that connects on its own.
 //   - grap-*.aes and NGService.exe are NGS-X, the anti-cheat of MapleStory
-//     Classic World (MSCW folder). Its game is also named MapleStory.exe, so it
-//     was already listed; the main game's anti-cheat (BlackCipher) always was.
+//     Classic World and MapleStory Worlds.
+//
+// BlackCall64.aes, NGClient64.aes, grap-communicator64.aes and mr.dll are DLLs
+// loaded into other processes, so they never match; they stay, being harmless.
 func DefaultMapleStory() Game {
 	return Game{
 		Name: "MapleStory",
 		Processes: []string{
-			"MapleStory.exe", "msw.exe", "MapleBrowser_WZ2.exe",
-			"nexon_launcher.exe", "nexon_client.exe", "nexon_runtime.exe", "NexonPlug.exe",
-			"nxsteam.exe", "NGM.exe", "NGM64.exe", "NMService.exe", "SIG.exe",
-			"ms-launcher.exe", "DwarfAxe.exe",
-			"BlackCipher64.aes", "BlackCall64.aes", "NGClient64.aes", "NGCLIENT.AES",
-			"grap-core64.aes", "grap-communicator64.aes", "grap-updater.aes", "NGService.exe",
+			"MapleStory.exe",
+			"MapleBrowser_WZ2.exe", "msw.exe", "ms-launcher.exe",
+			"nexon_launcher.exe", "nexon_client.exe", "nexon_runtime.exe", "nxsteam.exe", "NexonPlug.exe",
+			"NGM.exe", "NGM64.exe", "NMService.exe", "SIG.exe", "DwarfAxe.exe", mswWebHelper,
+			"NGService.exe", "NGClient64.aes", "NGCLIENT.AES",
+			"grap-core64.aes", "grap-communicator64.aes", "grap-updater.aes",
+			"BlackCipher64.aes", "BlackCall64.aes", "BlackXchg.aes",
 			"UnityCrashHandler64.exe", "CrashReportClient.exe",
 			"MapleRoyals.exe", "mr.dll", "MapleLegends.exe", "DreamMS.exe",
-			"Kaizen v92.exe", "Kaizenv92.exe", "Fantasia.exe",
 		},
 		Protocol:          ProtocolBoth,
 		SendDomainToProxy: true,
@@ -80,17 +85,23 @@ type Group struct {
 // Together the groups list every process exactly once.
 func DisplayGroups() []Group {
 	return []Group{
-		{Name: "MapleStory", Processes: []string{"MapleStory.exe", "msw.exe", "MapleBrowser_WZ2.exe"}},
-		{Name: "Nexon 登录器与组件", Processes: []string{"nexon_launcher.exe", "nexon_client.exe", "nexon_runtime.exe",
-			"NexonPlug.exe", "nxsteam.exe", "NGM.exe", "NGM64.exe", "NMService.exe", "SIG.exe",
-			"ms-launcher.exe", "DwarfAxe.exe"}},
-		{Name: "反作弊", Processes: []string{"BlackCipher64.aes", "BlackCall64.aes", "NGClient64.aes", "NGCLIENT.AES",
-			"grap-core64.aes", "grap-communicator64.aes", "grap-updater.aes", "NGService.exe"}},
+		{Name: "MapleStory", Processes: []string{"MapleStory.exe"}},
+		{Name: "Nexon 登录器与组件", Processes: []string{"MapleBrowser_WZ2.exe", "msw.exe", "ms-launcher.exe",
+			"nexon_launcher.exe", "nexon_client.exe", "nexon_runtime.exe", "nxsteam.exe", "NexonPlug.exe",
+			"NGM.exe", "NGM64.exe", "NMService.exe", "SIG.exe", "DwarfAxe.exe", mswWebHelper}},
+		{Name: "反作弊", Processes: []string{"NGService.exe", "NGClient64.aes", "NGCLIENT.AES",
+			"grap-core64.aes", "grap-communicator64.aes", "grap-updater.aes",
+			"BlackCipher64.aes", "BlackCall64.aes", "BlackXchg.aes"}},
 		{Name: "崩溃上报", Processes: []string{"UnityCrashHandler64.exe", "CrashReportClient.exe"}},
-		{Name: "其他客户端", Processes: []string{"MapleRoyals.exe", "mr.dll", "MapleLegends.exe", "DreamMS.exe",
-			"Kaizen v92.exe", "Kaizenv92.exe", "Fantasia.exe"}},
+		{Name: "其他客户端", Processes: []string{"MapleRoyals.exe", "mr.dll", "MapleLegends.exe", "DreamMS.exe"}},
 	}
 }
+
+// mswWebHelper is MapleStory Worlds' web view helper. Other apps use the name
+// cefhelper.exe too, so it is matched by path: the core compares a pattern
+// containing a backslash with the full image path, and RunningMatches skips
+// wildcard patterns, so it never counts as a running game either.
+const mswWebHelper = `*\ToyWebView\cefhelper.exe`
 
 // Addon is an optional app accelerated alongside the game. Like the game's,
 // its process list is fixed: users can only switch an addon on or off.

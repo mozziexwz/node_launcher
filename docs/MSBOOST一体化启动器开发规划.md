@@ -1,7 +1,7 @@
 # MSBOOST 一体化启动器开发规划
 
 > 仓库：<https://github.com/mozziexwz/node_launcher>
-> 日期：2026-10-12（2026-10-16 更新）　状态：M0 已完成（`docs/m0/README.md`）；M1 已完成并通过真实游戏验收（`docs/m1/README.md`）；M2 界面已通过实测验收并合并（`docs/m2/README.md`）；M3 打包已通过实测验收（`docs/m3/README.md`）；M4 改为虚拟机长时间测试，已通过；首个正式版本为 v1.0.0；M5 暂不做。v1.0.1 兼容其他代理软件的系统代理（§4.8），已通过实测验收（`docs/v1.0.1/README.md`）。v1.0.2 修复 Steam 版登录窗口黑屏，加速名单增加 7 项（§4.3，`docs/v1.0.2/README.md`）。
+> 日期：2026-10-12（2026-10-16 更新）　状态：M0 已完成（`docs/m0/README.md`）；M1 已完成并通过真实游戏验收（`docs/m1/README.md`）；M2 界面已通过实测验收并合并（`docs/m2/README.md`）；M3 打包已通过实测验收（`docs/m3/README.md`）；M4 改为虚拟机长时间测试，已通过；首个正式版本为 v1.0.0；M5 暂不做。v1.0.1 兼容其他代理软件的系统代理（§4.8），已通过实测验收（`docs/v1.0.1/README.md`）。v1.0.2 修复 Steam 版登录窗口黑屏，按确认的名单把加速进程调整为 30 项（§4.3，`docs/v1.0.2/README.md`）。
 >
 > 依据：
 > - `legacy/MSBOOST启动器_全程TCP测速.bat`，以及 `docs/MSBOOST全程TCP测速整改计划.md`
@@ -174,17 +174,17 @@ MapleStory.exe ──TCP──▶ [WinDivert 驱动] ──改写──▶ Proxy
 
 ### 4.3 游戏设置
 
-- **加速进程**：默认原样沿用你实测通过的 ProxyBridge 配置，共 24 项；v1.0.2 增加 7 项，现为 31 项：
-  - 冒险岛与 MapleStory Worlds：`MapleStory.exe`、`msw.exe`、`MapleBrowser_WZ2.exe`（v1.0.2）
-  - Nexon 登录器与组件：`nexon_launcher.exe`、`nexon_client.exe`、`nexon_runtime.exe`、`NexonPlug.exe`、`nxsteam.exe`、`NGM.exe`、`NGM64.exe`、`NMService.exe`、`SIG.exe`、`ms-launcher.exe`、`DwarfAxe.exe`（后两项 v1.0.2）
-  - 反作弊：`BlackCipher64.aes`、`BlackCall64.aes`、`NGClient64.aes`、`NGCLIENT.AES`、`grap-core64.aes`、`grap-communicator64.aes`、`grap-updater.aes`、`NGService.exe`（后四项 v1.0.2）
+- **加速进程**：最初原样沿用你实测通过的 ProxyBridge 配置（24 项）。v1.0.2 按你确认的名单调整为 30 项（详见 `docs/v1.0.2/README.md`）：
+  - MapleStory：`MapleStory.exe`
+  - Nexon 登录器与组件：`MapleBrowser_WZ2.exe`、`msw.exe`、`ms-launcher.exe`、`nexon_launcher.exe`、`nexon_client.exe`、`nexon_runtime.exe`、`nxsteam.exe`、`NexonPlug.exe`、`NGM.exe`、`NGM64.exe`、`NMService.exe`、`SIG.exe`、`DwarfAxe.exe`、`*\ToyWebView\cefhelper.exe`
+  - 反作弊：`NGService.exe`、`NGClient64.aes`、`NGCLIENT.AES`、`grap-core64.aes`、`grap-communicator64.aes`、`grap-updater.aes`、`BlackCipher64.aes`、`BlackCall64.aes`、`BlackXchg.aes`
   - 崩溃上报：`UnityCrashHandler64.exe`、`CrashReportClient.exe`
-  - 私服客户端：`MapleRoyals.exe`、`mr.dll`、`MapleLegends.exe`、`DreamMS.exe`、`Kaizen v92.exe`、`Kaizenv92.exe`、`Fantasia.exe`
+  - 其他客户端：`MapleRoyals.exe`、`mr.dll`、`MapleLegends.exe`、`DreamMS.exe`
 
-  v1.0.2 根据 Steam 版的安装目录增加了 7 项（详见 `docs/v1.0.2/README.md`）：
-  - `ms-launcher.exe`：Steam 版的启动器（`mslauncher` 目录，基于 Electron，子进程都同名）。从 Steam 启动时显示的“NEXON”登录窗口就是它，之前漏掉，这个窗口一直黑屏。
-  - `DwarfAxe.exe`、`MapleBrowser_WZ2.exe`：游戏自带的网页组件，分别属于 Nexon 游戏内覆盖层（`NxOverlay`）和游戏内浏览器。网页由它们加载和联网，而不是 `MapleStory.exe`。
-  - `grap-*.aes`、`NGService.exe`：MapleStory Classic World（`MSCW` 目录）的反作弊 NGS-X。它的游戏程序也叫 `MapleStory.exe`，早已在加速中；主游戏的反作弊 BlackCipher 一直在名单里，这次补上同类组件。
+  与最初的配置相比：
+  - 新增 `ms-launcher.exe`（Steam 版启动器，漏掉时登录窗口黑屏），以及几个网页组件和反作弊组件；
+  - 移除 Kaizen、Fantasia；
+  - `cefhelper.exe` 名字通用，按路径只匹配 MapleStory Worlds 的。
 
   清单固定在程序里（`internal/profiles`），**用户不能修改**；需要调整时随新版本发布。分流核心按分号分隔的清单匹配进程名，不区分大小写。
 - **可选加速**：两个开关，默认关闭。
@@ -194,6 +194,7 @@ MapleStory.exe ──TCP──▶ [WinDivert 驱动] ──改写──▶ Proxy
   每个开关对应一条独立规则，可在加速中切换：只对之后新建的连接生效，已有连接要重连。M2 验证这一点。
 - **协议**：TCP + UDP；目标主机、端口、域名都是“全部”；SOCKS5 发送域名（SendDomainToProxy）开启。均与实测配置一致。
   - 发送域名时由节点解析，节点端规则 `msboost-filter`（GFW 规则集）会拒绝其中的域名。M0 长时间测试中只出现过 1 次（`g.nexonstatic.com`），游戏不受影响。
+  - v1.0.2 排查发现，它也会拒绝谷歌人机验证脚本所在的 `www.gstatic.com`，登录器因此偶尔转圈（`docs/v1.0.2/README.md` 第 4 节）。
 - **测速目标**：在设置中可以自定义 IPv4 和端口，默认 `35.155.204.207:8585`。例如玩 MapleLegends 时可以改成它的服务器地址。校验规则与 v2 合同一致：必须是规范的公网 IPv4，端口在 1–65535。
 
 ### 4.4 网络检测（移植自 BAT 的 [3]）
@@ -518,7 +519,7 @@ node_launcher/
 
 已确认（2026-10-12）：
 
-1. 进程清单与协议：以 `MapleStory.pbprofile` 为准，共 24 项，TCP + UDP（§4.3）。v1.0.2 增加 7 项，见 §4.3。
+1. 进程清单与协议：以 `MapleStory.pbprofile` 为准，共 24 项，TCP + UDP（§4.3）。v1.0.2 调整为 30 项，见 §4.3。
 2. 程序文件名 `MSBOOST-Launcher.exe`，窗口标题“MSBOOST 启动器”（D9）。
 3. 首版需要托盘图标（D10，M0 第 9 项）。
 
