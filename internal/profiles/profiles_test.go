@@ -1,6 +1,7 @@
 package profiles
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -10,11 +11,26 @@ func TestDefaultMapleStory(t *testing.T) {
 	if err := g.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if len(g.Processes) != 24 {
-		t.Fatalf("got %d processes, want the 24 tested entries", len(g.Processes))
+	if len(g.Processes) != 30 {
+		t.Fatalf("got %d processes, want the 30 entries reviewed for v1.0.2", len(g.Processes))
+	}
+	// Without ms-launcher.exe the Steam version's login window stays black.
+	for _, p := range []string{"ms-launcher.exe", "DwarfAxe.exe", "MapleBrowser_WZ2.exe", mswWebHelper,
+		"BlackXchg.aes", "grap-core64.aes", "grap-communicator64.aes", "grap-updater.aes", "NGService.exe"} {
+		if !slices.Contains(g.Processes, p) {
+			t.Errorf("%s missing from the list", p)
+		}
+	}
+	for _, p := range []string{"Kaizen v92.exe", "Kaizenv92.exe", "Fantasia.exe", "cefhelper.exe"} {
+		if slices.Contains(g.Processes, p) {
+			t.Errorf("%s must not be listed by bare name", p)
+		}
+	}
+	if !strings.Contains(mswWebHelper, `\`) {
+		t.Errorf("%q must contain a path separator so the core matches the full path", mswWebHelper)
 	}
 	list := g.ProcessList()
-	if strings.HasSuffix(list, ";") || !strings.Contains(list, "Kaizen v92.exe;Kaizenv92.exe") {
+	if strings.HasSuffix(list, ";") || !strings.Contains(list, "MapleLegends.exe;DreamMS.exe") {
 		t.Fatalf("unexpected list %q", list)
 	}
 	if g.Protocol != ProtocolBoth || !g.SendDomainToProxy {
