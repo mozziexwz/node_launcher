@@ -518,8 +518,8 @@ nav {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 24px;
-    padding: 26px 28px;
+    gap: 20px;
+    padding: 26px 24px;
     border-radius: var(--radius);
     border: 1px solid var(--line);
     background: var(--panel);
@@ -547,10 +547,13 @@ nav {
     font-variant-numeric: tabular-nums;
 }
 
+/* Sized so that, with Steady values, the row fits on one line in the default
+   window and wraps only in a narrower one, whatever the numbers are. */
 .hero-stats {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px 22px;
+    gap: 4px 16px;
+    font-size: 13px;
 }
 
 .hero-stats b {
@@ -559,7 +562,24 @@ nav {
 }
 
 .hero-stats b + b {
-    margin-left: 10px;
+    margin-left: 8px;
+}
+
+.hero-stats > span {
+    white-space: nowrap;
+}
+
+/* A live value keeps the width of its widest text (Steady in components). */
+.steady {
+    display: inline-grid;
+}
+
+.steady > span {
+    grid-area: 1 / 1;
+}
+
+.steady > span:first-child {
+    visibility: hidden;
 }
 
 .hero-note {
@@ -569,7 +589,7 @@ nav {
 }
 
 .hero-button {
-    min-width: 168px;
+    min-width: 140px;
     height: 54px;
     border-radius: 27px;
     font-size: 17px;

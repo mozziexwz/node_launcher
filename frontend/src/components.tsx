@@ -149,6 +149,22 @@ export function formatBytes(n: number): string {
     return `${i === 0 ? v : Number(v.toFixed(2))} ${byteUnits[i]}`
 }
 
+// The widest text formatBytes and formatUptime produce. Digits render at one
+// width (tabular-nums), and M is the widest unit letter.
+export const widestBytes = '0000.00 MiB'
+export const widestUptime = '000:00:00'
+
+// Steady shows a live value in the width of the widest text it can take, so
+// a row of changing numbers keeps its layout instead of reflowing.
+export function Steady(props: { value: string, widest: string }) {
+    return (
+        <b className="steady">
+            <span aria-hidden="true">{props.widest}</span>
+            <span>{props.value}</span>
+        </b>
+    )
+}
+
 export function formatUptime(sinceUnix: number): string {
     if (!sinceUnix) return '—'
     const total = Math.max(0, Math.floor((Date.now() - sinceUnix) / 1000))

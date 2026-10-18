@@ -1,6 +1,6 @@
 import {useState} from 'react'
 import {api, Check, errorText, Overview} from '../api'
-import {Banner, Card, formatBytes, formatUptime, Spinner, Switch, useClock} from '../components'
+import {Banner, Card, formatBytes, formatUptime, Spinner, Steady, Switch, useClock, widestBytes, widestUptime} from '../components'
 
 const fixLabels: Record<string, string> = {
     proxybridge: '停止 ProxyBridge',
@@ -136,9 +136,10 @@ export function Home(props: {
                         {st.state === 'running' ? (
                                 <>
                                     <div className="hero-stats">
-                                        <span>已运行 <b>{formatUptime(st.sinceUnix)}</b></span>
-                                        <span>已使用流量 <b>{formatBytes(st.upload + st.download)}</b></span>
-                                        <span>当前速率 <b>↑ {formatBytes(st.uploadRate)}/s</b> <b>↓ {formatBytes(st.downloadRate)}/s</b></span>
+                                        <span>已运行 <Steady value={formatUptime(st.sinceUnix)} widest={widestUptime}/></span>
+                                        <span>已使用流量 <Steady value={formatBytes(st.upload + st.download)} widest={widestBytes}/></span>
+                                        <span>当前速率 <Steady value={`↑ ${formatBytes(st.uploadRate)}/s`} widest={`↑ ${widestBytes}/s`}/>
+                                            {' '}<Steady value={`↓ ${formatBytes(st.downloadRate)}/s`} widest={`↓ ${widestBytes}/s`}/></span>
                                     </div>
                                     {st.systemProxy && st.systemProxy.length > 0 && (
                                         <div className="hero-note">
