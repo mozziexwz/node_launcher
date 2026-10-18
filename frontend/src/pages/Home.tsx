@@ -1,6 +1,7 @@
 import {useState} from 'react'
-import {api, Check, errorText, Overview} from '../api'
-import {Banner, Card, formatBytes, formatUptime, Spinner, Steady, Switch, useClock, widestBytes, widestUptime} from '../components'
+import {api, errorText, Overview} from '../api'
+import {Banner, Spinner, Switch} from '../components'
+import {canCheck, CheckState, checkLabel, shortResult} from './Check'
 
 const fixLabels: Record<string, string> = {
     proxybridge: '停止 ProxyBridge',
@@ -13,11 +14,28 @@ const stateText = {
     stopping: '正在停止加速…',
 }
 
+// CheckSummary is the one-line form of the network check on the home page.
+function CheckSummary(props: {check: CheckState}) {
+    const {result: r, running, error} = props.check
+    if (running) return <span className="summary none"><Spinner/>正在检测 MSBOOST IPv4 和延迟…</span>
+    if (error) return <span className="summary"><b className="bad">检测失败</b></span>
+    if (!r) return <span className="summary none"><span>MSBOOST IPv4 —</span><span>中转 —</span><span>游戏 —</span></span>
+    return (
+        <span className="summary">
+            <span>MSBOOST IPv4 <b className={r.exitIP ? '' : 'bad'}>{r.exitIP || '查询失败'}</b></span>
+            <span>中转 <b className={r.entrance.ok ? 'ok' : 'bad'}>{shortResult(r.entrance)}</b></span>
+            <span>游戏 <b className={r.game.ok ? 'ok' : 'bad'}>{shortResult(r.game)}</b></span>
+        </span>
+    )
+}
+
 export function Home(props: {
     overview: Overview
     refresh: () => Promise<void>
     confirm: (title: string, message: string, confirm: string, danger?: boolean) => Promise<boolean>
+    check: CheckState
     goConfigs: () => void
+    goCheck: () => void
 }) {
     const o = props.overview
     const st = o.status
@@ -27,12 +45,8 @@ export function Home(props: {
     const blocking = o.conflicts.filter(c => c.blocking)
     const [warnings, setWarnings] = useState<string[]>([])
     const [error, setError] = useState('')
-    const [check, setCheck] = useState<Check | null>(null)
-    const [checking, setChecking] = useState(false)
-    const [checkError, setCheckError] = useState('')
     const [fixing, setFixing] = useState('')
     const [fixReport, setFixReport] = useState<string[]>([])
-    useClock(running)
 
     const hasCurrent = validConfigs.some(c => c.current)
     const canStart = !busy && o.elevated && !o.lockError && hasCurrent && blocking.length === 0
@@ -104,21 +118,15 @@ export function Home(props: {
         return {label: fixLabels[fix] ?? '自动处理', onClick: () => fixConflict(fix), busy: fixing === fix}
     }
 
-    const runCheck = async () => {
-        setChecking(true)
-        setCheckError('')
-        setCheck(null)
-        try {
-            setCheck(await api.runCheck())
-        } catch (e) {
-            setCheckError(errorText(e))
-        } finally {
-            setChecking(false)
-        }
-    }
+    const note = running ? (st.systemProxy && st.systemProxy.length > 0
+            ? `已接管系统代理 ${st.systemProxy.join('、')}：游戏发往它的请求改由 MSBOOST 发出` : '')
+        : st.state === 'starting' ? '正在连接 MSBOOST 节点并加载分流驱动…'
+        : st.state === 'stopping' ? '正在断开连接并卸载分流驱动…'
+        : !hasCurrent ? '请先在上方选择节点配置'
+        : '开始加速后再打开 MapleStory'
 
     return (
-        <div className="page">
+        <div className="page home">
             {o.lockError && <Banner kind="error">{o.lockError}</Banner>}
             {!o.elevated && <Banner kind="error">程序没有以管理员身份运行，无法开始加速。请右键程序选择“以管理员身份运行”。</Banner>}
             {o.settingsError && <Banner kind="warn">{o.settingsError}</Banner>}
@@ -129,92 +137,53 @@ export function Home(props: {
             {error && <Banner kind="error" onClose={() => setError('')}>{error}</Banner>}
             {warnings.map(w => <Banner key={w} kind="warn" onClose={() => setWarnings(ws => ws.filter(x => x !== w))}>{w}</Banner>)}
 
-            <section className={'hero ' + st.state}>
-                <div className="hero-state">
-                    <div className="hero-label">{stateText[st.state]}</div>
-                    <div className="hero-sub">
-                        {st.state === 'running' ? (
-                                <>
-                                    <div className="hero-stats">
-                                        <span>已运行 <Steady value={formatUptime(st.sinceUnix)} widest={widestUptime}/></span>
-                                        <span>已使用流量 <Steady value={formatBytes(st.upload + st.download)} widest={widestBytes}/></span>
-                                        <span>当前速率 <Steady value={`↑ ${formatBytes(st.uploadRate)}/s`} widest={`↑ ${widestBytes}/s`}/>
-                                            {' '}<Steady value={`↓ ${formatBytes(st.downloadRate)}/s`} widest={`↓ ${widestBytes}/s`}/></span>
-                                    </div>
-                                    {st.systemProxy && st.systemProxy.length > 0 && (
-                                        <div className="hero-note">
-                                            已接管系统代理 {st.systemProxy.join('、')}：游戏发往它的请求改由 MSBOOST 发出
-                                        </div>
-                                    )}
-                                </>
-                            )
-                            : st.state === 'starting' ? '正在连接 MSBOOST 节点并加载分流驱动…'
-                            : st.state === 'stopping' ? '正在断开连接并卸载分流驱动…'
-                            : validConfigs.length === 0 ? <>还没有可用的节点配置，请先<button className="link" onClick={props.goConfigs}>导入配置</button></>
-                            : !hasCurrent ? '请先在下方选择节点配置'
-                            : '开始加速后再打开 MapleStory'}
-                    </div>
-                </div>
-                <button className={'hero-button ' + (running ? 'stop' : 'start')} disabled={running ? busy : !canStart} onClick={toggle}>
-                    {busy && <Spinner/>}
-                    {running ? '停止加速' : st.state === 'starting' ? '正在开始…' : '开始加速'}
-                </button>
-            </section>
-
-            <div className="grid two">
-                <Card title="节点配置" actions={<button className="link" onClick={props.goConfigs}>管理配置</button>}>
+            <section className="lines">
+                <div className="line">
+                    <span className="line-label">节点配置</span>
                     {validConfigs.length === 0
-                        ? <p className="muted">configs 文件夹中没有可用的配置。</p>
+                        ? <span className="muted">还没有可用的节点配置，请先<button className="link" onClick={props.goConfigs}>导入配置</button></span>
                         : (
                             <select value={validConfigs.find(c => c.current)?.name ?? ''} disabled={st.state !== 'idle'}
+                                    title={st.state !== 'idle' ? '加速中不能切换配置，请先停止加速' : undefined}
                                     onChange={e => select(e.target.value)}>
                                 {!hasCurrent && <option value="" disabled>请选择节点配置</option>}
                                 {validConfigs.map(c => <option key={c.name} value={c.name}>{c.name.replace(/\.json$/i, '')}</option>)}
                             </select>
                         )}
-                    {st.state !== 'idle' && <p className="muted small">加速中不能切换配置，请先停止加速。</p>}
-                </Card>
+                    <button className="link" onClick={props.goConfigs}>管理</button>
+                </div>
+                <div className="line">
+                    <span className="line-label">可选加速</span>
+                    <div className="toggles">
+                        {o.addons.map(a => (
+                            <span className="toggle" key={a.id} title={a.note}>
+                                <Switch label={a.name} checked={a.enabled} disabled={busy} onChange={v => switchAddon(a.id, v)}/>
+                                {a.name}
+                            </span>
+                        ))}
+                    </div>
+                    <span className="hint">{running ? '加速中切换只对新连接生效' : ''}</span>
+                </div>
+                <div className="line">
+                    <span className="line-label">网络检测</span>
+                    <CheckSummary check={props.check}/>
+                    <span className="line-actions">
+                        <button className="small" onClick={props.check.run} disabled={!canCheck(o, props.check)}>{checkLabel(props.check)}</button>
+                        <button className="link" onClick={props.goCheck}>详情</button>
+                    </span>
+                </div>
+            </section>
 
-                <Card title="可选加速">
-                    {o.addons.map(a => (
-                        <div className="addon-row" key={a.id}>
-                            <div>
-                                <div className="addon-name">{a.name}</div>
-                                <div className="muted small">{a.note}</div>
-                            </div>
-                            <Switch label={a.name} checked={a.enabled} disabled={busy} onChange={v => switchAddon(a.id, v)}/>
-                        </div>
-                    ))}
-                    {running && <p className="muted small">加速中切换只对之后新建的连接生效。</p>}
-                </Card>
-            </div>
-
-            <Card title="网络检测" actions={
-                <button onClick={runCheck} disabled={checking || busy || !hasCurrent}>
-                    {checking && <Spinner/>}{checking ? '检测中…' : '开始检测'}
+            <section className="home-foot">
+                <div className="state-block">
+                    <div className={'state-title ' + st.state}><span className="dot"/>{stateText[st.state]}</div>
+                    {note && <div className="state-note">{note}</div>}
+                </div>
+                <button className={'hero-button ' + (running ? 'stop' : 'start')} disabled={running ? busy : !canStart} onClick={toggle}>
+                    {busy && <Spinner/>}
+                    {running ? '停止加速' : st.state === 'starting' ? '正在开始…' : st.state === 'stopping' ? '正在停止…' : '开始加速'}
                 </button>
-            }>
-                {checkError && <Banner kind="error">{checkError}</Banner>}
-                {!check && !checkError && (
-                    <p className="muted">查询连接到游戏服务器的 IPv4，并检测到中转服务器及到游戏服务器的延迟。</p>
-                )}
-                {check && (
-                    <dl className="check">
-                        <dt>当前到游戏服务器 IPv4</dt>
-                        <dd className={check.exitIP ? 'ok' : 'bad'}>{check.exitIP || '查询失败：' + check.exitIPError}</dd>
-                        <dt>当前到中转服务器延迟</dt>
-                        <dd className={check.entrance.ok ? 'ok' : 'bad'}>
-                            {check.entrance.text}
-                            {check.entranceTarget && <span className="target"> {check.entranceTarget}　{check.entrance.detail}</span>}
-                        </dd>
-                        <dt>当前到游戏服务器延迟</dt>
-                        <dd className={check.game.ok ? 'ok' : 'bad'}>
-                            {check.game.text}
-                            <span className="target"> {check.gameTarget}　{check.game.detail}</span>
-                        </dd>
-                    </dl>
-                )}
-            </Card>
+            </section>
         </div>
     )
 }

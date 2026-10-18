@@ -16,7 +16,7 @@
     --red-pale: #fbeeee;
     --amber: #8b5a12;
     --amber-pale: #fdf5e4;
-    --radius: 14px;
+    --radius: 10px;
     --shadow: 0 8px 28px rgba(45, 32, 18, .035);
     color-scheme: light;
 }
@@ -34,8 +34,8 @@ body {
     background: var(--bg);
     color: var(--ink);
     font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
-    font-size: 14px;
-    line-height: 1.6;
+    font-size: 13px;
+    line-height: 1.5;
     overflow: hidden;
     user-select: none;
 }
@@ -53,11 +53,11 @@ button {
     align-items: center;
     justify-content: center;
     gap: 6px;
-    padding: 7px 14px;
+    padding: 5px 12px;
     border: 1px solid var(--line);
-    border-radius: 9px;
+    border-radius: 8px;
     background: var(--panel);
-    font-size: 13px;
+    font-size: 12.5px;
     line-height: 1.4;
     white-space: nowrap;
     cursor: pointer;
@@ -104,6 +104,12 @@ button.danger-text {
     background: transparent;
 }
 
+button.small {
+    padding: 2px 10px;
+    border-radius: 7px;
+    font-size: 11.5px;
+}
+
 button.link {
     padding: 0 2px;
     border: 0;
@@ -120,12 +126,12 @@ button.link:hover:not(:disabled) {
 input, select {
     font: inherit;
     color: var(--ink);
-    font-size: 13px;
+    font-size: 12.5px;
     background: #fff;
     border: 1px solid #ddd9d3;
-    border-radius: 8px;
-    padding: 7px 10px;
-    min-height: 36px;
+    border-radius: 7px;
+    padding: 4px 9px;
+    min-height: 30px;
 }
 
 input:focus, select:focus {
@@ -211,9 +217,9 @@ select {
 }
 
 .switch .track {
-    width: 40px;
-    height: 23px;
-    border-radius: 23px;
+    width: 32px;
+    height: 19px;
+    border-radius: 19px;
     background: #d6d3cf;
     padding: 3px;
     transition: background .16s;
@@ -221,8 +227,8 @@ select {
 
 .switch .thumb {
     display: block;
-    width: 17px;
-    height: 17px;
+    width: 13px;
+    height: 13px;
     border-radius: 50%;
     background: #fff;
     box-shadow: 0 1px 3px rgba(0, 0, 0, .2);
@@ -234,7 +240,7 @@ select {
 }
 
 .switch input:checked + .track .thumb {
-    transform: translateX(17px);
+    transform: translateX(13px);
 }
 
 .switch input:focus-visible + .track {
@@ -249,73 +255,129 @@ select {
 
 /* ---- shell ---- */
 
+/* Netch-like window: tabs across the top, the page, then a status bar. */
 .shell {
     display: flex;
+    flex-direction: column;
     height: 100%;
 }
 
-.sidebar {
-    width: 200px;
+.tabs {
+    display: flex;
+    align-items: stretch;
+    gap: 2px;
+    height: 34px;
     flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
+    padding: 0 10px;
     background: var(--panel);
-    border-right: 1px solid var(--line);
-    padding: 22px 12px 14px;
+    border-bottom: 1px solid var(--line);
 }
 
-.brand {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 0 10px 18px;
+.tab {
+    padding: 0 11px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    background: transparent;
+    color: #646260;
+    font-size: 12.5px;
 }
 
-.brand-name {
-    font-weight: 800;
-    font-size: 19px;
-    letter-spacing: .6px;
-    line-height: 1.2;
-}
-
-.brand-sub {
-    font-size: 11px;
-    color: var(--sub);
-    letter-spacing: 4px;
-}
-
-.state-pill {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin: 0 6px 16px;
-    padding: 8px 12px;
-    border-radius: 10px;
+.tab:hover:not(:disabled) {
     background: var(--soft);
-    color: var(--sub);
-    font-size: 12px;
+}
+
+.tab.active, .tab.active:hover:not(:disabled) {
+    background: transparent;
+    border-bottom-color: var(--orange);
+    color: var(--orange-dark);
     font-weight: 600;
 }
 
-.state-pill .dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: currentColor;
+.tab-icon {
+    width: 14px;
+    height: 14px;
 }
 
-.state-pill.running {
-    background: var(--green-pale);
-    color: var(--green);
+.tabs-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--faint);
+    font-size: 11px;
+    user-select: text;
 }
 
-.state-pill.running .dot {
-    animation: pulse 1.6s ease-in-out infinite;
+.tabs-right .home-link {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .5px;
 }
 
-.state-pill.starting, .state-pill.stopping {
-    background: var(--pale);
-    color: var(--orange-dark);
+.content {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow: auto;
+    padding: 10px 12px;
+}
+
+.statusbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    height: 26px;
+    flex-shrink: 0;
+    padding: 0 12px;
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    color: var(--sub);
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.status-left {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.status-left > span + span::before {
+    content: "";
+    display: inline-block;
+    width: 1px;
+    height: 11px;
+    margin: 0 10px;
+    background: var(--line);
+    vertical-align: -1px;
+}
+
+.statusbar b {
+    color: var(--ink);
+    font-weight: 600;
+}
+
+.status-right {
+    flex-shrink: 0;
+}
+
+/* A live value keeps the width of its widest text (Steady in components). */
+.steady {
+    display: inline-grid;
+}
+
+.steady > span {
+    grid-area: 1 / 1;
+}
+
+.steady > span:first-child {
+    visibility: hidden;
 }
 
 @keyframes pulse {
@@ -324,79 +386,12 @@ select {
     }
 }
 
-nav {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    flex: 1;
-}
-
-.nav-item {
-    justify-content: flex-start;
-    gap: 11px;
-    width: 100%;
-    padding: 9px 12px;
-    border: 0;
-    border-radius: 9px;
-    background: transparent;
-    color: #646260;
-    font-size: 13.5px;
-}
-
-.nav-item:hover:not(:disabled) {
-    background: var(--soft);
-}
-
-.nav-item.active, .nav-item.active:hover:not(:disabled) {
-    background: var(--pale);
-    color: var(--orange-dark);
-    font-weight: 600;
-}
-
-.nav-icon {
-    width: 18px;
-    height: 18px;
-    flex-shrink: 0;
-}
-
-.sidebar-foot {
-    padding: 12px 10px 0;
-    border-top: 1px solid var(--line);
-    color: var(--faint);
-    font-size: 11px;
-    user-select: text;
-}
-
-.sidebar-foot .home-link {
-    margin-top: 2px;
-    font-weight: 700;
-    letter-spacing: .5px;
-}
-
-.content {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    overflow: auto;
-    padding: 0 28px 24px;
-}
-
-.content-head {
-    padding: 22px 0 16px;
-}
-
-.content-head h1 {
-    font-size: 21px;
-    font-weight: 700;
-}
-
 .loading {
     display: flex;
     align-items: center;
     gap: 10px;
     color: var(--sub);
-    padding: 40px 0;
+    padding: 24px 0;
 }
 
 /* ---- page building blocks ---- */
@@ -404,12 +399,12 @@ nav {
 .page {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 8px;
 }
 
 .page.fill {
     flex: 1;
-    min-height: 320px;
+    min-height: 200px;
 }
 
 .card {
@@ -417,10 +412,10 @@ nav {
     border: 1px solid var(--line);
     border-radius: var(--radius);
     box-shadow: var(--shadow);
-    padding: 18px 20px;
+    padding: 10px 12px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 8px;
     min-width: 0;
 }
 
@@ -438,7 +433,7 @@ nav {
 }
 
 .card-head h2 {
-    font-size: 15px;
+    font-size: 13px;
     font-weight: 650;
 }
 
@@ -449,28 +444,17 @@ nav {
     flex-wrap: wrap;
 }
 
-.grid.two {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 16px;
-}
-
 .banner {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
     gap: 12px;
-    padding: 10px 14px;
+    padding: 6px 10px;
     border: 1px solid;
-    border-radius: 10px;
-    font-size: 13px;
-    line-height: 1.7;
-    margin-bottom: 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    line-height: 1.6;
     user-select: text;
-}
-
-.page .banner, .card .banner {
-    margin-bottom: 0;
 }
 
 .banner-text {
@@ -498,8 +482,8 @@ nav {
 
 .banner-action {
     flex-shrink: 0;
-    padding: 4px 12px;
-    font-size: 12.5px;
+    padding: 2px 10px;
+    font-size: 12px;
     font-weight: 600;
     background: #fff;
     border-color: currentColor;
@@ -514,85 +498,137 @@ nav {
 
 /* ---- home ---- */
 
-.hero {
+.page.home {
+    flex: 1;
+}
+
+.lines {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 2px 12px;
+}
+
+.line {
+    display: grid;
+    grid-template-columns: 64px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    min-height: 38px;
+}
+
+.line + .line {
+    border-top: 1px solid var(--soft);
+}
+
+.line-label {
+    color: var(--sub);
+}
+
+.toggles {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 20px;
-    padding: 26px 24px;
-    border-radius: var(--radius);
-    border: 1px solid var(--line);
-    background: var(--panel);
-    box-shadow: var(--shadow);
+    gap: 22px;
 }
 
-.hero.running {
-    background: linear-gradient(110deg, #fff 30%, var(--pale));
-    border-color: #f6d9c6;
+.toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
 }
 
-.hero-label {
-    font-size: 26px;
-    font-weight: 750;
-    letter-spacing: .5px;
+.hint {
+    color: var(--faint);
+    font-size: 11.5px;
 }
 
-.hero.running .hero-label {
-    color: var(--orange-dark);
-}
-
-.hero-sub {
-    margin-top: 6px;
-    color: var(--sub);
+.summary {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-variant-numeric: tabular-nums;
 }
 
-/* Sized so that, with Steady values, the row fits on one line in the default
-   window and wraps only in a narrower one, whatever the numbers are. */
-.hero-stats {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 16px;
-    font-size: 13px;
-}
-
-.hero-stats b {
-    color: var(--ink);
+.summary b {
     font-weight: 600;
 }
 
-.hero-stats b + b {
-    margin-left: 8px;
+.summary > span + span {
+    margin-left: 14px;
 }
 
-.hero-stats > span {
-    white-space: nowrap;
-}
-
-/* A live value keeps the width of its widest text (Steady in components). */
-.steady {
-    display: inline-grid;
-}
-
-.steady > span {
-    grid-area: 1 / 1;
-}
-
-.steady > span:first-child {
-    visibility: hidden;
-}
-
-.hero-note {
-    margin-top: 4px;
-    font-size: 12px;
+.summary.none, .none {
     color: var(--faint);
+    font-weight: 400;
+}
+
+.summary .spinner {
+    width: 11px;
+    height: 11px;
+    margin-right: 6px;
+    vertical-align: -1px;
+}
+
+.line-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* Pinned to the bottom so the start button stays in view when banners push
+   the page past the window. It reaches into .content's bottom padding. */
+.home-foot {
+    position: sticky;
+    bottom: -10px;
+    margin: auto 0 -10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 4px 2px 10px;
+    background: var(--bg);
+}
+
+.state-title {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--sub);
+    font-size: 14px;
+    font-weight: 650;
+}
+
+.state-title .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.state-title.running {
+    color: var(--green);
+}
+
+.state-title.running .dot {
+    animation: pulse 1.6s ease-in-out infinite;
+}
+
+.state-title.starting, .state-title.stopping {
+    color: var(--orange-dark);
+}
+
+.state-note {
+    color: var(--faint);
+    font-size: 11px;
 }
 
 .hero-button {
-    min-width: 140px;
-    height: 54px;
-    border-radius: 27px;
-    font-size: 17px;
+    min-width: 120px;
+    height: 36px;
+    border-radius: 18px;
+    font-size: 14px;
     font-weight: 650;
     letter-spacing: 1px;
 }
@@ -601,7 +637,7 @@ nav {
     background: var(--orange);
     border-color: var(--orange);
     color: #fff;
-    box-shadow: 0 8px 20px rgba(231, 101, 39, .25);
+    box-shadow: 0 6px 16px rgba(231, 101, 39, .22);
 }
 
 .hero-button.start:hover:not(:disabled) {
@@ -642,7 +678,7 @@ nav {
 dl.check {
     display: grid;
     grid-template-columns: max-content 1fr;
-    gap: 10px 20px;
+    gap: 6px 16px;
     margin: 0;
     user-select: text;
 }
@@ -661,7 +697,7 @@ dl.check .target {
     margin-left: 8px;
     color: var(--faint);
     font-weight: 400;
-    font-size: 12px;
+    font-size: 11.5px;
 }
 
 /* ---- configs ---- */
@@ -682,8 +718,8 @@ dl.check .target {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 16px;
-    padding: 12px 16px;
+    gap: 12px;
+    padding: 7px 12px;
 }
 
 .config-list li + li {
@@ -734,12 +770,12 @@ dl.check .target {
 }
 
 .chip {
-    padding: 2px 9px;
+    padding: 1px 8px;
     border-radius: 6px;
     background: var(--soft);
     border: 1px solid var(--line);
     font-family: Consolas, "Cascadia Mono", monospace;
-    font-size: 12px;
+    font-size: 11.5px;
     user-select: text;
 }
 
@@ -759,7 +795,7 @@ dl.check .target {
 }
 
 .target-form input {
-    width: 200px;
+    width: 170px;
 }
 
 .target-form input.port {
@@ -767,7 +803,7 @@ dl.check .target {
 }
 
 .target-form button {
-    min-height: 36px;
+    min-height: 30px;
 }
 
 /* ---- logs ---- */
@@ -804,13 +840,13 @@ dl.check .target {
 .log-box {
     flex: 1;
     overflow: auto;
-    padding: 10px 12px;
+    padding: 6px 10px;
     border: 1px solid var(--line);
-    border-radius: 10px;
+    border-radius: 8px;
     background: #fcfbfa;
     font-family: Consolas, "Cascadia Mono", "Microsoft YaHei UI", monospace;
-    font-size: 12px;
-    line-height: 1.75;
+    font-size: 11.5px;
+    line-height: 1.6;
     user-select: text;
 }
 
@@ -893,12 +929,12 @@ dl.facts dd {
 }
 
 .notice {
-    padding: 10px 14px;
-    border-radius: 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
     background: var(--soft);
     color: #5d5953;
-    font-size: 12.5px;
-    line-height: 1.8;
+    font-size: 12px;
+    line-height: 1.7;
 }
 
 table.components {
@@ -937,21 +973,24 @@ table.components td:last-child, table.components th:last-child {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 24px;
+    padding: 12px;
     background: rgba(29, 24, 20, .36);
 }
 
 .modal {
-    width: 440px;
+    width: 420px;
     max-width: 100%;
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
     background: #fff;
-    border-radius: 16px;
-    padding: 22px 24px 18px;
+    border-radius: 12px;
+    padding: 14px 16px 12px;
     box-shadow: 0 30px 100px rgba(0, 0, 0, .2);
 }
 
 .modal.wide {
-    width: 680px;
+    width: 700px;
 }
 
 .modal-body table.components {
@@ -971,13 +1010,15 @@ table.components td:last-child, table.components th:last-child {
 }
 
 .modal h3 {
-    font-size: 16px;
-    margin-bottom: 10px;
+    font-size: 14px;
+    margin-bottom: 8px;
 }
 
 .modal-body {
+    min-height: 0;
+    overflow: auto;
     color: #4a4743;
-    line-height: 1.75;
+    line-height: 1.65;
     overflow-wrap: anywhere;
 }
 
@@ -985,7 +1026,7 @@ table.components td:last-child, table.components th:last-child {
     display: flex;
     justify-content: flex-end;
     gap: 8px;
-    margin-top: 20px;
+    margin-top: 12px;
 }
 
 .modal-actions button.danger {
