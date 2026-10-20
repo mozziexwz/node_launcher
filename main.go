@@ -52,14 +52,14 @@ func main() {
 		fatal(err.Error())
 	}
 	a := NewApp(layout, log, rt, exe)
-	// The window is Netch-sized: 776×337 leaves a 760×298 client area once
-	// Windows adds the title bar and borders.
+	// Like Netch, the window has a fixed size and no maximise button: 776×337
+	// leaves about a 760×298 client area once Windows adds the title bar and
+	// borders.
 	err = wails.Run(&options.App{
 		Title:            "MSBOOST 启动器",
 		Width:            776,
 		Height:           337,
-		MinWidth:         776,
-		MinHeight:        337,
+		DisableResize:    true,
 		AssetServer:      &assetserver.Options{Assets: assets},
 		BackgroundColour: &options.RGBA{R: 246, G: 247, B: 249, A: 1},
 		OnStartup:        a.startup,
