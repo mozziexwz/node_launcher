@@ -52,14 +52,18 @@ export function Game(props: {overview: Overview, refresh: () => Promise<void>}) 
 
     return (
         <div className="page">
-            <Card title="加速对象">
-                <p className="muted">以下程序的 TCP 和 UDP 连接会经过 MSBOOST 节点，其他程序一律直连。清单固定，随新版本更新。</p>
-                {o.gameGroups.map(g => (
-                    <div className="group" key={g.name}>
-                        <div className="group-name">{g.name}</div>
-                        <div className="chips">{g.processes.map(p => <span className="chip" key={p}>{p}</span>)}</div>
-                    </div>
-                ))}
+            <Card title="游戏测速目标">
+                <p className="muted">
+                    请填写测速目标游戏服务器的公网 IPv4 和端口。<br/>
+                    默认 GMS：35.155.204.207:8585
+                </p>
+                {message && <Banner kind={message.kind} onClose={() => setMessage(null)}>{message.text}</Banner>}
+                <div className="target-form">
+                    <label>IPv4<input value={address} onChange={e => setAddress(e.target.value)} spellCheck={false}/></label>
+                    <label>端口<input value={port} onChange={e => setPort(e.target.value)} inputMode="numeric" className="port"/></label>
+                    <button className="primary" onClick={save}>保存</button>
+                    <button onClick={reset}>恢复默认</button>
+                </div>
             </Card>
 
             <Card title="可选加速">
@@ -75,18 +79,14 @@ export function Game(props: {overview: Overview, refresh: () => Promise<void>}) 
                 ))}
             </Card>
 
-            <Card title="游戏测速目标">
-                <p className="muted">
-                    请填写测速目标游戏服务器的公网 IPv4 和端口。<br/>
-                    默认 GMS：35.155.204.207:8585
-                </p>
-                {message && <Banner kind={message.kind} onClose={() => setMessage(null)}>{message.text}</Banner>}
-                <div className="target-form">
-                    <label>IPv4<input value={address} onChange={e => setAddress(e.target.value)} spellCheck={false}/></label>
-                    <label>端口<input value={port} onChange={e => setPort(e.target.value)} inputMode="numeric" className="port"/></label>
-                    <button className="primary" onClick={save}>保存</button>
-                    <button onClick={reset}>恢复默认</button>
-                </div>
+            <Card title="加速对象">
+                <p className="muted">以下程序的 TCP 和 UDP 连接会经过 MSBOOST 节点，其他程序一律直连。清单固定，随新版本更新。</p>
+                {o.gameGroups.map(g => (
+                    <div className="group" key={g.name}>
+                        <div className="group-name">{g.name}</div>
+                        <div className="chips">{g.processes.map(p => <span className="chip" key={p}>{p}</span>)}</div>
+                    </div>
+                ))}
             </Card>
         </div>
     )

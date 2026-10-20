@@ -1,7 +1,7 @@
 # MSBOOST 一体化启动器开发规划
 
 > 仓库：<https://github.com/mozziexwz/node_launcher>
-> 日期：2026-10-12（2026-10-19 更新）　状态：M0 已完成（`docs/m0/README.md`）；M1 已完成并通过真实游戏验收（`docs/m1/README.md`）；M2 界面已通过实测验收并合并（`docs/m2/README.md`）；M3 打包已通过实测验收（`docs/m3/README.md`）；M4 改为虚拟机长时间测试，已通过；首个正式版本为 v1.0.0；M5 暂不做。v1.0.1 兼容其他代理软件的系统代理（§4.8），已通过实测验收（`docs/v1.0.1/README.md`）。v1.0.2 修复 Steam 版登录窗口黑屏，按确认的名单把加速进程调整为 30 项（§4.3，`docs/v1.0.2/README.md`），已通过实测验收。v1.0.3 修正加速页统计行一行两行来回跳（`docs/v1.0.3/README.md`），已通过实测验收。
+> 日期：2026-10-12（2026-10-20 更新）　状态：M0 已完成（`docs/m0/README.md`）；M1 已完成并通过真实游戏验收（`docs/m1/README.md`）；M2 界面已通过实测验收并合并（`docs/m2/README.md`）；M3 打包已通过实测验收（`docs/m3/README.md`）；M4 改为虚拟机长时间测试，已通过；首个正式版本为 v1.0.0；M5 暂不做。v1.0.1 兼容其他代理软件的系统代理（§4.8），已通过实测验收（`docs/v1.0.1/README.md`）。v1.0.2 修复 Steam 版登录窗口黑屏，按确认的名单把加速进程调整为 30 项（§4.3，`docs/v1.0.2/README.md`），已通过实测验收。v1.0.3 修正加速页统计行一行两行来回跳（`docs/v1.0.3/README.md`），已通过实测验收。v1.1.0 改成 Netch 式固定大小的小窗口：顶部标签页、底部状态栏，网络检测单独成页（`docs/v1.1.0/README.md`），已通过实测验收。
 >
 > 依据：
 > - `legacy/MSBOOST启动器_全程TCP测速.bat`，以及 `docs/MSBOOST全程TCP测速整改计划.md`
