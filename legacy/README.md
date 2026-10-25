@@ -7,8 +7,8 @@
 | `MSBOOST启动器_全程TCP测速.bat` | 旧版启动器，与原件逐字节一致（UTF-8 无 BOM、CRLF） |
 | `tests/Test-FullPathBoundaries.ps1` | 全程测速 v2 回复解析的 64 个边界用例，M1 移植为 Go 测试 |
 | `tests/Test-FullPathLatency.ps1` | 全程测速 v2 的 20 组行为用例，M1 移植为 Go 测试 |
-| `tests/Test-FullPathPackaging.ps1`、`tests/Test-FullPathSmoke.ps1` | BAT 打包与冒烟检查 |
-| `tests/Test-Latency.ps1`、`tests/Test-RelayTcpProbe.ps1` | v1 测速方案的测试，仅留作历史参考 |
+
+BAT 打包与冒烟检查（`Test-FullPathPackaging.ps1`、`Test-FullPathSmoke.ps1`）和 v1 测速方案的测试（`Test-Latency.ps1`、`Test-RelayTcpProbe.ps1`）与现在的程序无关，已删除，需要时可从 git 历史中找回。
 
 ## 与原件的差异
 
