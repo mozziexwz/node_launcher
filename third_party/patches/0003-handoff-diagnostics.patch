@@ -30,18 +30,16 @@
                  }
  
                  if (tcp_header->Rst)
-@@ -893,6 +907,10 @@
+@@ -893,6 +907,8 @@
                      ip_header->DstAddr = ip_header->SrcAddr;
                      ip_header->SrcAddr = temp_addr;
                      addr.Outbound = FALSE;
 +
-+                    // MSBOOST patch P5
-+                    if (tcp_header->Syn && !tcp_header->Ack && InterlockedIncrement(&g_diag_syn_again) <= DIAG_LOG_LIMIT)
-+                        log_message("[DIAG] SYN from port %u sent again: no SYN-ACK reached the app yet", (unsigned)src_port);
++                    diag_app_packet(packet, packet_len);  // MSBOOST patch P5
                  }
  
              }
-@@ -1023,6 +1041,18 @@
+@@ -1023,6 +1039,18 @@
                      ip_header->DstAddr = ip_header->SrcAddr;
                      ip_header->SrcAddr = temp_addr;
                      addr.Outbound = FALSE;
@@ -60,7 +58,7 @@
                  }
                  }
              }
-@@ -1285,6 +1315,8 @@
+@@ -1285,6 +1313,8 @@
          return FALSE;
      }
  
@@ -69,7 +67,7 @@
      // Socket-layer events give the owner PID of each new connection without a table scan.
      // Optional: if it cannot be opened the lookups fall back to the table.
      sockmap_start();
-@@ -1451,6 +1483,7 @@
+@@ -1451,6 +1481,7 @@
      memset((void*)port_decided_bitmap, 0, sizeof(port_decided_bitmap));
      memset((void*)port_direct_bitmap,  0, sizeof(port_direct_bitmap));
  
@@ -79,42 +77,79 @@
      return TRUE;
 --- /dev/null
 +++ b/pb_diag.c
-@@ -0,0 +1,205 @@
+@@ -0,0 +1,393 @@
 +#include "pb_internal.h"
 +
-+// MSBOOST patch P5: hand-off diagnostics.
++// MSBOOST patch P5: hand-off diagnostics and the impostor bridge (test build).
 +//
 +// A proxied TCP connection that is not loopback reaches the local relay by being turned
-+// around (ProxyBridge.c): the app's SYN to remote:port gets the relay port, its addresses
-+// are swapped and it is injected inbound; the relay's SYN-ACK is turned back to the app the
-+// same way. When something on the machine breaks that, the app just waits - no error
-+// anywhere. These counters record each step: ProxyBridge.c counts the packets it turns
-+// around, pb_relay.c what the relay does with the connections that reach it. The first
-+// DIAG_LOG_LIMIT of each kind are logged and Stop logs a summary.
++// around (ProxyBridge.c): each packet the app sends gets the relay port, its addresses are
++// swapped and it is injected inbound; each packet the relay sends is turned back the same
++// way. The counters below record each step; the first DIAG_LOG_LIMIT of each kind are
++// logged and Stop logs a summary.
 +//
-+// The watcher is a second WinDivert handle, sniff-only and above the main one. It sees the
-+// relay's own SYN-ACK and RST packets before the main handle does, including packets that
-+// another driver injected ("impostor" packets, which the main handle's filter skips), so the
-+// summary tells a SYN that never reached the relay from a reply the main handle never saw.
-+// Sniffing never blocks or changes a packet.
++// The watcher is a sniff-only WinDivert handle above the main one. It sees the relay's own
++// SYN-ACK and RST packets, and the resets real servers send to proxied connections, which
++// show that the app's packets went to the real server instead of the relay.
++//
++// The bridge. The main handle's filter skips packets another driver injected ("impostor"
++// packets), so that two drivers cannot pass a packet back and forth forever. On some
++// machines a driver re-injects the packets of established connections: a proxied
++// connection's SYN still reaches the relay, but every packet after it goes to the real
++// server, which resets the connection. The bridge takes impostor packets below the main
++// handle. Those of proxied connections are injected again from above the main handle,
++// which then handles them like any other packet (WinDivert passes a packet it injected
++// only to lower priorities, and not as an impostor). Everything else is passed on
++// unchanged. If a packet the bridge passed on comes back, the other driver re-injects what
++// WinDivert injects and the two would loop, so the bridge turns itself off.
++
++#define BRIDGE_RECV_PRIORITY 122   // below the main handle (123, ProxyBridge_Start)
++#define BRIDGE_SEND_PRIORITY 124   // above it
 +
 +volatile LONG g_diag_syn = 0;               // first SYN of a flow turned to the relay
-+volatile LONG g_diag_syn_again = 0;         // later SYNs of such a flow: no SYN-ACK reached the app
 +volatile LONG g_diag_not_syn = 0;           // flows whose first packet seen was not a SYN
 +volatile LONG g_diag_relay_synack = 0;      // relay SYN-ACKs turned back to the app
 +volatile LONG g_diag_relay_rst = 0;         // relay RSTs turned back to the app
 +volatile LONG g_diag_relay_untracked = 0;   // relay packets for a port with no tracked flow
 +
-+static volatile LONG g_diag_accepted = 0;           // turned-around connections handed on
-+static volatile LONG g_diag_accepted_loopback = 0;  // loopback connections handed on
-+static volatile LONG g_diag_closed_noflow = 0;      // closed: no tracked flow for the peer's port
-+static volatile LONG g_diag_closed_peer = 0;        // closed: peer is not the flow's original destination
++static volatile LONG g_app_ack = 0, g_app_data = 0, g_app_fin = 0, g_app_rst = 0;  // later app packets turned to the relay
++static volatile LONG g_accepted = 0;            // turned-around connections the relay handed on
++static volatile LONG g_accepted_loopback = 0;   // loopback connections the relay handed on
++static volatile LONG g_closed_noflow = 0;       // closed: no tracked flow for the peer's port
++static volatile LONG g_closed_peer = 0;         // closed: peer is not the flow's original destination
 +
 +static volatile LONG g_watch_synack = 0, g_watch_synack_impostor = 0;
 +static volatile LONG g_watch_rst = 0, g_watch_rst_impostor = 0;
++static volatile LONG g_watch_server_rst = 0;    // resets from the network to proxied connections
 +static HANDLE g_watch_handle = INVALID_HANDLE_VALUE;
 +static HANDLE g_watch_thread = NULL;
 +static UINT8 g_watch_packet[WINDIVERT_MTU_MAX];
++
++static volatile LONG g_bridge_ours = 0, g_bridge_other = 0, g_bridge_fail = 0, g_bridge_loop = 0;
++static HANDLE g_bridge_recv = INVALID_HANDLE_VALUE;
++static HANDLE g_bridge_send = INVALID_HANDLE_VALUE;
++static HANDLE g_bridge_thread = NULL;
++static UINT8 g_bridge_packet[WINDIVERT_MTU_MAX];
++
++typedef struct { UINT64 key; DWORD tick; UINT8 ttl; } BRIDGE_SEEN;
++static BRIDGE_SEEN g_bridge_seen[4096];   // packets passed on lately, to spot one coming back
++
++static const char *tcp_kind(const WINDIVERT_TCPHDR *tcp, UINT payload)
++{
++    if (tcp->Rst) return "RST";
++    if (tcp->Syn) return tcp->Ack ? "SYN-ACK" : "SYN";
++    if (tcp->Fin) return "FIN";
++    return payload > 0 ? "data" : "ACK";
++}
++
++static void src_text(const WINDIVERT_IPHDR *ip4, const WINDIVERT_IPV6HDR *ip6, char *out, size_t size)
++{
++    if (ip4 != NULL)
++        snprintf(out, size, "%d.%d.%d.%d", (int)(ip4->SrcAddr & 0xFF), (int)((ip4->SrcAddr >> 8) & 0xFF),
++            (int)((ip4->SrcAddr >> 16) & 0xFF), (int)((ip4->SrcAddr >> 24) & 0xFF));
++    else if (ip6 == NULL || inet_ntop(AF_INET6, ip6->SrcAddr, out, size) == NULL)
++        snprintf(out, size, "?");
++}
 +
 +static DWORD WINAPI watch_thread(LPVOID arg)
 +{
@@ -132,10 +167,26 @@
 +            continue;
 +        }
 +
++        PWINDIVERT_IPHDR ip4 = NULL;
++        PWINDIVERT_IPV6HDR ip6 = NULL;
 +        PWINDIVERT_TCPHDR tcp = NULL;
-+        WinDivertHelperParsePacket(g_watch_packet, len, NULL, NULL, NULL, NULL, NULL, &tcp, NULL, NULL, NULL, NULL, NULL);
++        WinDivertHelperParsePacket(g_watch_packet, len, &ip4, &ip6, NULL, NULL, NULL, &tcp, NULL, NULL, NULL, NULL, NULL);
 +        if (tcp == NULL)
 +            continue;
++
++        if (!addr.Outbound)
++        {
++            UINT16 port = ntohs(tcp->DstPort);
++            if (port != g_local_relay_port && is_connection_tracked(port, FALSE, ip6 != NULL) &&
++                InterlockedIncrement(&g_watch_server_rst) <= DIAG_LOG_LIMIT)
++            {
++                char from[INET6_ADDRSTRLEN];
++                src_text(ip4, ip6, from, sizeof(from));
++                log_message("[DIAG] watcher: reset from %s port %u to proxied port %u - the app's packets reached the real server",
++                    from, (unsigned)ntohs(tcp->SrcPort), (unsigned)port);
++            }
++            continue;
++        }
 +
 +        BOOL impostor = addr.Impostor;
 +        const char *kind;
@@ -159,91 +210,226 @@
 +
 +        if (n <= DIAG_LOG_LIMIT)
 +            log_message("[DIAG] watcher: relay %s to port %u%s", kind, (unsigned)ntohs(tcp->DstPort),
-+                impostor ? ", injected by another driver (the hand-off skips such packets)" : "");
++                impostor ? ", injected by another driver" : "");
 +    }
 +    return 0;
 +}
 +
-+static void watch_close(void)
++// TRUE when the bridge passed this packet on lately and it came back with a lower TTL
++// (WinDivert lowers the TTL of an impostor packet it injects): the other driver re-injects
++// what the bridge passes on.
++static BOOL bridge_came_back(const WINDIVERT_IPHDR *ip4, const WINDIVERT_IPV6HDR *ip6,
++                             const WINDIVERT_TCPHDR *tcp, UINT payload)
 +{
-+    if (g_watch_handle != INVALID_HANDLE_VALUE)
++    UINT32 parts[5];
++    parts[0] = ((UINT32)tcp->SrcPort << 16) | tcp->DstPort;
++    parts[1] = tcp->SeqNum;
++    parts[2] = tcp->AckNum;
++    parts[3] = payload;
++    parts[4] = ip4 != NULL ? ip4->Id : (ip6 != NULL ? ip6->FlowLabel1 : 0);
++    UINT64 key = 1469598103934665603ULL;
++    for (int i = 0; i < 5; i++)
 +    {
-+        WinDivertShutdown(g_watch_handle, WINDIVERT_SHUTDOWN_BOTH);
-+        WinDivertClose(g_watch_handle);
-+        g_watch_handle = INVALID_HANDLE_VALUE;
++        key ^= parts[i];
++        key *= 1099511628211ULL;
 +    }
-+    if (g_watch_thread != NULL)
++    UINT8 ttl = ip4 != NULL ? ip4->TTL : (ip6 != NULL ? ip6->HopLimit : 0);
++    DWORD now = GetTickCount();
++    BRIDGE_SEEN *e = &g_bridge_seen[(key >> 32) & 4095];
++    BOOL back = e->key == key && now - e->tick < 2000 && ttl < e->ttl;
++    e->key = key;
++    e->tick = now;
++    e->ttl = ttl;
++    return back;
++}
++
++static DWORD WINAPI bridge_thread(LPVOID arg)
++{
++    (void)arg;
++    WINDIVERT_ADDRESS addr;
++    UINT len = 0;
++    BOOL off = FALSE;
++    while (1)
 +    {
-+        WaitForSingleObject(g_watch_thread, 2000);
-+        CloseHandle(g_watch_thread);
-+        g_watch_thread = NULL;
++        if (!WinDivertRecv(g_bridge_recv, g_bridge_packet, (UINT)sizeof(g_bridge_packet), &len, &addr))
++        {
++            DWORD err = GetLastError();
++            if (!running || err == ERROR_INVALID_HANDLE || err == ERROR_NO_DATA || err == ERROR_OPERATION_ABORTED)
++                break;
++            Sleep(5);
++            continue;
++        }
++
++        PWINDIVERT_IPHDR ip4 = NULL;
++        PWINDIVERT_IPV6HDR ip6 = NULL;
++        PWINDIVERT_TCPHDR tcp = NULL;
++        UINT payload = 0;
++        WinDivertHelperParsePacket(g_bridge_packet, len, &ip4, &ip6, NULL, NULL, NULL, &tcp, NULL, NULL, &payload, NULL, NULL);
++
++        if (!off && tcp != NULL)
++        {
++            UINT16 sp = ntohs(tcp->SrcPort);
++            if (sp == g_local_relay_port || is_connection_tracked(sp, FALSE, ip6 != NULL))
++            {
++                if (InterlockedIncrement(&g_bridge_ours) <= DIAG_LOG_LIMIT)
++                    log_message("[DIAG] bridge: %s from port %u to port %u was injected by another driver, handed to the hand-off",
++                        tcp_kind(tcp, payload), (unsigned)sp, (unsigned)ntohs(tcp->DstPort));
++                if (WinDivertSend(g_bridge_send, g_bridge_packet, len, NULL, &addr))
++                    continue;
++                if (InterlockedIncrement(&g_bridge_fail) <= DIAG_LOG_LIMIT)
++                    log_message("[DIAG] bridge: handing a packet to the hand-off failed (%lu)", GetLastError());
++            }
++            else
++            {
++                if (InterlockedIncrement(&g_bridge_other) <= 3)
++                    log_message("[DIAG] bridge: %s from port %u to port %u was injected by another driver, passed on",
++                        tcp_kind(tcp, payload), (unsigned)sp, (unsigned)ntohs(tcp->DstPort));
++                if (bridge_came_back(ip4, ip6, tcp, payload))
++                {
++                    off = TRUE;
++                    InterlockedIncrement(&g_bridge_loop);
++                    log_message("[DIAG] bridge: a packet it passed on came back from the other driver - bridge off");
++                    WinDivertShutdown(g_bridge_recv, WINDIVERT_SHUTDOWN_RECV);   // drain what is queued, then stop
++                }
++            }
++        }
++        WinDivertSend(g_bridge_recv, g_bridge_packet, len, NULL, &addr);   // pass on unchanged
++    }
++    return 0;
++}
++
++static void close_handle(HANDLE *handle, HANDLE *thread)
++{
++    if (*handle != INVALID_HANDLE_VALUE)
++    {
++        WinDivertShutdown(*handle, WINDIVERT_SHUTDOWN_BOTH);
++        WinDivertClose(*handle);
++        *handle = INVALID_HANDLE_VALUE;
++    }
++    if (thread != NULL && *thread != NULL)
++    {
++        WaitForSingleObject(*thread, 2000);
++        CloseHandle(*thread);
++        *thread = NULL;
++    }
++}
++
++static void stop_all(void)
++{
++    close_handle(&g_watch_handle, &g_watch_thread);
++    close_handle(&g_bridge_recv, &g_bridge_thread);
++    close_handle(&g_bridge_send, NULL);
++}
++
++static void start_watcher(void)
++{
++    char filter[192];
++    snprintf(filter, sizeof(filter),
++        "tcp and not loopback and ((outbound and tcp.SrcPort == %u and (tcp.Syn or tcp.Rst)) or (inbound and tcp.Rst))",
++        (unsigned)g_local_relay_port);
++    g_watch_handle = WinDivertOpen(filter, WINDIVERT_LAYER_NETWORK, WINDIVERT_PRIORITY_HIGHEST,
++                                   WINDIVERT_FLAG_SNIFF | WINDIVERT_FLAG_RECV_ONLY);
++    if (g_watch_handle == INVALID_HANDLE_VALUE)
++    {
++        log_message("[DIAG] watcher unavailable (%lu)", GetLastError());
++        return;
++    }
++    g_watch_thread = CreateThread(NULL, 0, watch_thread, NULL, 0, NULL);
++    if (g_watch_thread == NULL)
++    {
++        log_message("[DIAG] watcher thread failed (%lu)", GetLastError());
++        close_handle(&g_watch_handle, NULL);
++    }
++}
++
++static void start_bridge(void)
++{
++    ZeroMemory(g_bridge_seen, sizeof(g_bridge_seen));
++    g_bridge_send = WinDivertOpen("false", WINDIVERT_LAYER_NETWORK, BRIDGE_SEND_PRIORITY, WINDIVERT_FLAG_SEND_ONLY);
++    if (g_bridge_send != INVALID_HANDLE_VALUE)
++        g_bridge_recv = WinDivertOpen("outbound and impostor and tcp and not loopback",
++                                      WINDIVERT_LAYER_NETWORK, BRIDGE_RECV_PRIORITY, 0);
++    if (g_bridge_recv == INVALID_HANDLE_VALUE)
++    {
++        log_message("[DIAG] bridge unavailable (%lu)", GetLastError());
++        close_handle(&g_bridge_send, NULL);
++        return;
++    }
++    WinDivertSetParam(g_bridge_recv, WINDIVERT_PARAM_QUEUE_LENGTH, 16384);
++    g_bridge_thread = CreateThread(NULL, 0, bridge_thread, NULL, 0, NULL);
++    if (g_bridge_thread == NULL)
++    {
++        log_message("[DIAG] bridge thread failed (%lu)", GetLastError());
++        close_handle(&g_bridge_recv, NULL);
++        close_handle(&g_bridge_send, NULL);
 +    }
 +}
 +
 +// Called by Start after the main handle is open and before the packet threads run.
 +void diag_start(void)
 +{
-+    watch_close();   // left over from a start that failed later on
++    stop_all();   // left over from a start that failed later on
 +
-+    InterlockedExchange(&g_diag_syn, 0);
-+    InterlockedExchange(&g_diag_syn_again, 0);
-+    InterlockedExchange(&g_diag_not_syn, 0);
-+    InterlockedExchange(&g_diag_relay_synack, 0);
-+    InterlockedExchange(&g_diag_relay_rst, 0);
-+    InterlockedExchange(&g_diag_relay_untracked, 0);
-+    InterlockedExchange(&g_diag_accepted, 0);
-+    InterlockedExchange(&g_diag_accepted_loopback, 0);
-+    InterlockedExchange(&g_diag_closed_noflow, 0);
-+    InterlockedExchange(&g_diag_closed_peer, 0);
-+    InterlockedExchange(&g_watch_synack, 0);
-+    InterlockedExchange(&g_watch_synack_impostor, 0);
-+    InterlockedExchange(&g_watch_rst, 0);
-+    InterlockedExchange(&g_watch_rst_impostor, 0);
++    volatile LONG *counters[] = {
++        &g_diag_syn, &g_diag_not_syn, &g_diag_relay_synack, &g_diag_relay_rst, &g_diag_relay_untracked,
++        &g_app_ack, &g_app_data, &g_app_fin, &g_app_rst,
++        &g_accepted, &g_accepted_loopback, &g_closed_noflow, &g_closed_peer,
++        &g_watch_synack, &g_watch_synack_impostor, &g_watch_rst, &g_watch_rst_impostor, &g_watch_server_rst,
++        &g_bridge_ours, &g_bridge_other, &g_bridge_fail, &g_bridge_loop,
++    };
++    for (int i = 0; i < (int)(sizeof(counters) / sizeof(counters[0])); i++)
++        InterlockedExchange(counters[i], 0);
 +
-+    char filter[160];
-+    snprintf(filter, sizeof(filter),
-+        "tcp and outbound and not loopback and tcp.SrcPort == %u and (tcp.Syn or tcp.Rst)",
-+        (unsigned)g_local_relay_port);
-+    g_watch_handle = WinDivertOpen(filter, WINDIVERT_LAYER_NETWORK, WINDIVERT_PRIORITY_HIGHEST,
-+                                   WINDIVERT_FLAG_SNIFF | WINDIVERT_FLAG_RECV_ONLY);
-+    if (g_watch_handle == INVALID_HANDLE_VALUE)
-+    {
-+        log_message("[DIAG] hand-off diagnostics on, watcher unavailable (%lu)", GetLastError());
-+        return;
-+    }
-+    g_watch_thread = CreateThread(NULL, 0, watch_thread, NULL, 0, NULL);
-+    if (g_watch_thread == NULL)
-+    {
-+        log_message("[DIAG] hand-off diagnostics on, watcher thread failed (%lu)", GetLastError());
-+        WinDivertClose(g_watch_handle);
-+        g_watch_handle = INVALID_HANDLE_VALUE;
-+        return;
-+    }
-+    log_message("[DIAG] hand-off diagnostics on (relay port %u)", (unsigned)g_local_relay_port);
++    start_watcher();
++    start_bridge();
++    log_message("[DIAG] hand-off diagnostics on (relay port %u, watcher %s, bridge %s)", (unsigned)g_local_relay_port,
++        g_watch_handle != INVALID_HANDLE_VALUE ? "on" : "off", g_bridge_recv != INVALID_HANDLE_VALUE ? "on" : "off");
 +}
 +
 +// Called by Stop once the packet threads and the relay's accept loop have ended.
 +void diag_stop(void)
 +{
 +    BOOL watched = g_watch_handle != INVALID_HANDLE_VALUE;
-+    watch_close();
++    BOOL bridged = g_bridge_recv != INVALID_HANDLE_VALUE;
++    stop_all();
 +
-+    log_message("[DIAG] hand-off summary: %ld SYN turned to the relay, %ld sent again, %ld connections without a first SYN; "
++    log_message("[DIAG] hand-off summary: %ld SYN turned to the relay, %ld connections without a first SYN; "
++                "later app packets turned to the relay: %ld ACK, %ld data, %ld FIN, %ld RST; "
 +                "%ld relay SYN-ACK and %ld relay RST turned back, %ld relay packets for no tracked flow; "
 +                "relay accepted %ld turned-around and %ld loopback connections, "
 +                "closed %ld with no tracked flow and %ld from an unexpected peer",
-+        (long)g_diag_syn, (long)g_diag_syn_again, (long)g_diag_not_syn,
++        (long)g_diag_syn, (long)g_diag_not_syn,
++        (long)g_app_ack, (long)g_app_data, (long)g_app_fin, (long)g_app_rst,
 +        (long)g_diag_relay_synack, (long)g_diag_relay_rst, (long)g_diag_relay_untracked,
-+        (long)g_diag_accepted, (long)g_diag_accepted_loopback,
-+        (long)g_diag_closed_noflow, (long)g_diag_closed_peer);
++        (long)g_accepted, (long)g_accepted_loopback, (long)g_closed_noflow, (long)g_closed_peer);
 +    if (watched)
-+        log_message("[DIAG] watcher: the relay sent %ld SYN-ACK (%ld injected by another driver) and %ld RST (%ld injected by another driver)",
-+            (long)g_watch_synack, (long)g_watch_synack_impostor, (long)g_watch_rst, (long)g_watch_rst_impostor);
++        log_message("[DIAG] watcher: the relay sent %ld SYN-ACK (%ld injected by another driver) and %ld RST "
++                    "(%ld injected by another driver); %ld resets from real servers to proxied connections",
++            (long)g_watch_synack, (long)g_watch_synack_impostor, (long)g_watch_rst, (long)g_watch_rst_impostor,
++            (long)g_watch_server_rst);
++    if (bridged)
++        log_message("[DIAG] bridge: %ld packets of proxied connections were injected by another driver and handed "
++                    "to the hand-off (%ld failed); %ld other such packets passed on%s",
++            (long)g_bridge_ours, (long)g_bridge_fail, (long)g_bridge_other,
++            g_bridge_loop ? "; turned off after a packet came back" : "");
++}
++
++// A later packet of a turned-around flow, sent by the app (ProxyBridge.c, tracked branch).
++void diag_app_packet(const void *packet, UINT len)
++{
++    PWINDIVERT_TCPHDR tcp = NULL;
++    UINT payload = 0;
++    WinDivertHelperParsePacket(packet, len, NULL, NULL, NULL, NULL, NULL, &tcp, NULL, NULL, &payload, NULL, NULL);
++    if (tcp == NULL)
++        return;
++    volatile LONG *counter = tcp->Rst ? &g_app_rst : tcp->Fin ? &g_app_fin : payload > 0 ? &g_app_data : &g_app_ack;
++    if (InterlockedIncrement(counter) <= DIAG_LOG_LIMIT)
++        log_message("[DIAG] app %s from port %u turned to the relay", tcp_kind(tcp, payload), (unsigned)ntohs(tcp->SrcPort));
 +}
 +
 +void diag_relay_accepted(BOOL loopback)
 +{
-+    InterlockedIncrement(loopback ? &g_diag_accepted_loopback : &g_diag_accepted);
++    InterlockedIncrement(loopback ? &g_accepted_loopback : &g_accepted);
 +}
 +
 +void diag_relay_accepted_v6(const struct in6_addr *peer)
@@ -256,11 +442,11 @@
 +{
 +    if (!tracked)
 +    {
-+        if (InterlockedIncrement(&g_diag_closed_noflow) <= DIAG_LOG_LIMIT)
++        if (InterlockedIncrement(&g_closed_noflow) <= DIAG_LOG_LIMIT)
 +            log_message("[DIAG] relay closed a connection from %s port %u: no tracked flow for that port",
 +                peer, (unsigned)port);
 +    }
-+    else if (InterlockedIncrement(&g_diag_closed_peer) <= DIAG_LOG_LIMIT)
++    else if (InterlockedIncrement(&g_closed_peer) <= DIAG_LOG_LIMIT)
 +        log_message("[DIAG] relay closed a connection from %s port %u: the flow's original destination is %s",
 +            peer, (unsigned)port, orig_dest);
 +}
@@ -287,16 +473,17 @@
 +}
 --- a/pb_internal.h
 +++ b/pb_internal.h
-@@ -385,6 +385,17 @@
+@@ -385,6 +385,18 @@
  extern volatile LONG g_active_relays;
  extern volatile LONG g_handler_threads;   // per-connection handshake threads still running (Stop waits for them)
  
-+// ---- pb_diag.c (MSBOOST patch P5: hand-off diagnostics) ----
++// ---- pb_diag.c (MSBOOST patch P5: hand-off diagnostics and the impostor bridge) ----
 +#define DIAG_LOG_LIMIT 8   // log the first few of each kind, count the rest
-+extern volatile LONG g_diag_syn, g_diag_syn_again, g_diag_not_syn;
++extern volatile LONG g_diag_syn, g_diag_not_syn;
 +extern volatile LONG g_diag_relay_synack, g_diag_relay_rst, g_diag_relay_untracked;
 +void diag_start(void);
 +void diag_stop(void);
++void diag_app_packet(const void *packet, UINT len);
 +void diag_relay_accepted(BOOL loopback);
 +void diag_relay_accepted_v6(const struct in6_addr *peer);
 +void diag_relay_closed_v4(BOOL tracked, UINT32 peer, UINT16 port, UINT32 orig_dest);
