@@ -77,7 +77,7 @@
      return TRUE;
 --- /dev/null
 +++ b/pb_diag.c
-@@ -0,0 +1,393 @@
+@@ -0,0 +1,400 @@
 +#include "pb_internal.h"
 +
 +// MSBOOST patch P5: hand-off diagnostics and the impostor bridge (test build).
@@ -94,14 +94,15 @@
 +//
 +// The bridge. The main handle's filter skips packets another driver injected ("impostor"
 +// packets), so that two drivers cannot pass a packet back and forth forever. On some
-+// machines a driver re-injects the packets of established connections: a proxied
-+// connection's SYN still reaches the relay, but every packet after it goes to the real
-+// server, which resets the connection. The bridge takes impostor packets below the main
-+// handle. Those of proxied connections are injected again from above the main handle,
-+// which then handles them like any other packet (WinDivert passes a packet it injected
-+// only to lower priorities, and not as an impostor). Everything else is passed on
-+// unchanged. If a packet the bridge passed on comes back, the other driver re-injects what
-+// WinDivert injects and the two would loop, so the bridge turns itself off.
++// machines a driver re-injects the packets of established flows: a proxied connection's
++// SYN still reaches the relay, but every packet after it goes to the real server, and a
++// UDP flow (QUIC) sends only its first packet through the proxy. The bridge takes outbound
++// impostor packets below the main handle and injects them again from above it, so the
++// main handle sees every packet as on any other machine and applies the rules as usual
++// (WinDivert passes a packet it injected only to lower priorities, and not as an
++// impostor). If a packet comes back after that, the other driver re-injects what WinDivert
++// injects and the two would loop, so the bridge turns itself off and passes such packets
++// on unchanged, as before.
 +
 +#define BRIDGE_RECV_PRIORITY 122   // below the main handle (123, ProxyBridge_Start)
 +#define BRIDGE_SEND_PRIORITY 124   // above it
@@ -125,14 +126,16 @@
 +static HANDLE g_watch_thread = NULL;
 +static UINT8 g_watch_packet[WINDIVERT_MTU_MAX];
 +
-+static volatile LONG g_bridge_ours = 0, g_bridge_other = 0, g_bridge_fail = 0, g_bridge_loop = 0;
++static volatile LONG g_bridge_tcp_ours = 0, g_bridge_tcp_other = 0;   // handed back: of proxied flows / others
++static volatile LONG g_bridge_udp_ours = 0, g_bridge_udp_other = 0;
++static volatile LONG g_bridge_fail = 0, g_bridge_loop = 0;
 +static HANDLE g_bridge_recv = INVALID_HANDLE_VALUE;
 +static HANDLE g_bridge_send = INVALID_HANDLE_VALUE;
 +static HANDLE g_bridge_thread = NULL;
 +static UINT8 g_bridge_packet[WINDIVERT_MTU_MAX];
 +
 +typedef struct { UINT64 key; DWORD tick; UINT8 ttl; } BRIDGE_SEEN;
-+static BRIDGE_SEEN g_bridge_seen[4096];   // packets passed on lately, to spot one coming back
++static BRIDGE_SEEN g_bridge_seen[4096];   // packets handed back lately, to spot one coming back
 +
 +static const char *tcp_kind(const WINDIVERT_TCPHDR *tcp, UINT payload)
 +{
@@ -215,20 +218,21 @@
 +    return 0;
 +}
 +
-+// TRUE when the bridge passed this packet on lately and it came back with a lower TTL
++// TRUE when the bridge handed this packet back lately and it came back with a lower TTL
 +// (WinDivert lowers the TTL of an impostor packet it injects): the other driver re-injects
-+// what the bridge passes on.
++// what WinDivert injects.
 +static BOOL bridge_came_back(const WINDIVERT_IPHDR *ip4, const WINDIVERT_IPV6HDR *ip6,
-+                             const WINDIVERT_TCPHDR *tcp, UINT payload)
++                             const WINDIVERT_TCPHDR *tcp, const WINDIVERT_UDPHDR *udp, UINT payload)
 +{
-+    UINT32 parts[5];
-+    parts[0] = ((UINT32)tcp->SrcPort << 16) | tcp->DstPort;
-+    parts[1] = tcp->SeqNum;
-+    parts[2] = tcp->AckNum;
-+    parts[3] = payload;
-+    parts[4] = ip4 != NULL ? ip4->Id : (ip6 != NULL ? ip6->FlowLabel1 : 0);
++    UINT32 parts[6];
++    parts[0] = tcp != NULL ? (((UINT32)tcp->SrcPort << 16) | tcp->DstPort) : (((UINT32)udp->SrcPort << 16) | udp->DstPort);
++    parts[1] = tcp != NULL ? tcp->SeqNum : udp->Checksum;
++    parts[2] = tcp != NULL ? tcp->AckNum : 0;
++    parts[3] = tcp != NULL ? tcp->Checksum : 0;
++    parts[4] = payload;
++    parts[5] = ip4 != NULL ? ip4->Id : (ip6 != NULL ? ip6->FlowLabel1 : 0);
 +    UINT64 key = 1469598103934665603ULL;
-+    for (int i = 0; i < 5; i++)
++    for (int i = 0; i < 6; i++)
 +    {
 +        key ^= parts[i];
 +        key *= 1099511628211ULL;
@@ -263,34 +267,36 @@
 +        PWINDIVERT_IPHDR ip4 = NULL;
 +        PWINDIVERT_IPV6HDR ip6 = NULL;
 +        PWINDIVERT_TCPHDR tcp = NULL;
++        PWINDIVERT_UDPHDR udp = NULL;
 +        UINT payload = 0;
-+        WinDivertHelperParsePacket(g_bridge_packet, len, &ip4, &ip6, NULL, NULL, NULL, &tcp, NULL, NULL, &payload, NULL, NULL);
++        WinDivertHelperParsePacket(g_bridge_packet, len, &ip4, &ip6, NULL, NULL, NULL, &tcp, &udp, NULL, &payload, NULL, NULL);
 +
-+        if (!off && tcp != NULL)
++        if (!off && (tcp != NULL || udp != NULL))
 +        {
-+            UINT16 sp = ntohs(tcp->SrcPort);
-+            if (sp == g_local_relay_port || is_connection_tracked(sp, FALSE, ip6 != NULL))
++            if (bridge_came_back(ip4, ip6, tcp, udp, payload))
 +            {
-+                if (InterlockedIncrement(&g_bridge_ours) <= DIAG_LOG_LIMIT)
-+                    log_message("[DIAG] bridge: %s from port %u to port %u was injected by another driver, handed to the hand-off",
-+                        tcp_kind(tcp, payload), (unsigned)sp, (unsigned)ntohs(tcp->DstPort));
-+                if (WinDivertSend(g_bridge_send, g_bridge_packet, len, NULL, &addr))
-+                    continue;
-+                if (InterlockedIncrement(&g_bridge_fail) <= DIAG_LOG_LIMIT)
-+                    log_message("[DIAG] bridge: handing a packet to the hand-off failed (%lu)", GetLastError());
++                off = TRUE;
++                InterlockedIncrement(&g_bridge_loop);
++                log_message("[DIAG] bridge: a packet it handed back came back from the other driver - bridge off");
++                WinDivertShutdown(g_bridge_recv, WINDIVERT_SHUTDOWN_RECV);   // drain what is queued, then stop
 +            }
 +            else
 +            {
-+                if (InterlockedIncrement(&g_bridge_other) <= 3)
-+                    log_message("[DIAG] bridge: %s from port %u to port %u was injected by another driver, passed on",
-+                        tcp_kind(tcp, payload), (unsigned)sp, (unsigned)ntohs(tcp->DstPort));
-+                if (bridge_came_back(ip4, ip6, tcp, payload))
-+                {
-+                    off = TRUE;
-+                    InterlockedIncrement(&g_bridge_loop);
-+                    log_message("[DIAG] bridge: a packet it passed on came back from the other driver - bridge off");
-+                    WinDivertShutdown(g_bridge_recv, WINDIVERT_SHUTDOWN_RECV);   // drain what is queued, then stop
-+                }
++                BOOL v6 = ip6 != NULL;
++                UINT16 sp = ntohs(tcp != NULL ? tcp->SrcPort : udp->SrcPort);
++                UINT16 dp = ntohs(tcp != NULL ? tcp->DstPort : udp->DstPort);
++                BOOL ours = tcp != NULL ? (sp == g_local_relay_port || is_connection_tracked(sp, FALSE, v6))
++                                        : (sp == LOCAL_UDP_RELAY_PORT || is_connection_tracked(sp, TRUE, v6));
++                volatile LONG *counter = tcp != NULL ? (ours ? &g_bridge_tcp_ours : &g_bridge_tcp_other)
++                                                     : (ours ? &g_bridge_udp_ours : &g_bridge_udp_other);
++                if (InterlockedIncrement(counter) <= (ours ? DIAG_LOG_LIMIT : 3))
++                    log_message("[DIAG] bridge: %s%s %s from port %u to port %u was injected by another driver, handed back",
++                        ours ? "proxied " : "", v6 ? "IPv6" : "IPv4",
++                        tcp != NULL ? tcp_kind(tcp, payload) : "UDP", (unsigned)sp, (unsigned)dp);
++                if (WinDivertSend(g_bridge_send, g_bridge_packet, len, NULL, &addr))
++                    continue;
++                if (InterlockedIncrement(&g_bridge_fail) <= DIAG_LOG_LIMIT)
++                    log_message("[DIAG] bridge: handing a packet back failed (%lu)", GetLastError());
 +            }
 +        }
 +        WinDivertSend(g_bridge_recv, g_bridge_packet, len, NULL, &addr);   // pass on unchanged
@@ -347,7 +353,7 @@
 +    ZeroMemory(g_bridge_seen, sizeof(g_bridge_seen));
 +    g_bridge_send = WinDivertOpen("false", WINDIVERT_LAYER_NETWORK, BRIDGE_SEND_PRIORITY, WINDIVERT_FLAG_SEND_ONLY);
 +    if (g_bridge_send != INVALID_HANDLE_VALUE)
-+        g_bridge_recv = WinDivertOpen("outbound and impostor and tcp and not loopback",
++        g_bridge_recv = WinDivertOpen("outbound and impostor and not loopback and (tcp or udp)",
 +                                      WINDIVERT_LAYER_NETWORK, BRIDGE_RECV_PRIORITY, 0);
 +    if (g_bridge_recv == INVALID_HANDLE_VALUE)
 +    {
@@ -375,7 +381,8 @@
 +        &g_app_ack, &g_app_data, &g_app_fin, &g_app_rst,
 +        &g_accepted, &g_accepted_loopback, &g_closed_noflow, &g_closed_peer,
 +        &g_watch_synack, &g_watch_synack_impostor, &g_watch_rst, &g_watch_rst_impostor, &g_watch_server_rst,
-+        &g_bridge_ours, &g_bridge_other, &g_bridge_fail, &g_bridge_loop,
++        &g_bridge_tcp_ours, &g_bridge_tcp_other, &g_bridge_udp_ours, &g_bridge_udp_other,
++        &g_bridge_fail, &g_bridge_loop,
 +    };
 +    for (int i = 0; i < (int)(sizeof(counters) / sizeof(counters[0])); i++)
 +        InterlockedExchange(counters[i], 0);
@@ -408,10 +415,10 @@
 +            (long)g_watch_synack, (long)g_watch_synack_impostor, (long)g_watch_rst, (long)g_watch_rst_impostor,
 +            (long)g_watch_server_rst);
 +    if (bridged)
-+        log_message("[DIAG] bridge: %ld packets of proxied connections were injected by another driver and handed "
-+                    "to the hand-off (%ld failed); %ld other such packets passed on%s",
-+            (long)g_bridge_ours, (long)g_bridge_fail, (long)g_bridge_other,
-+            g_bridge_loop ? "; turned off after a packet came back" : "");
++        log_message("[DIAG] bridge: handed back packets injected by another driver: TCP %ld of proxied connections "
++                    "and %ld others, UDP %ld of proxied flows and %ld others (%ld failed)%s",
++            (long)g_bridge_tcp_ours, (long)g_bridge_tcp_other, (long)g_bridge_udp_ours, (long)g_bridge_udp_other,
++            (long)g_bridge_fail, g_bridge_loop ? "; turned off after a packet came back" : "");
 +}
 +
 +// A later packet of a turned-around flow, sent by the app (ProxyBridge.c, tracked branch).
