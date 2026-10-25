@@ -49,6 +49,11 @@ type fakeRedirector struct {
 	startFails   bool
 	rules        map[uint32]string
 	proxies      map[uint32]bool
+
+	// TraceConnections is kept out of calls so the existing call sequences
+	// stay as they are; traceLog records where tracing began and ended.
+	traceFn  func(ConnEvent)
+	traceLog []string
 }
 
 func newFakeRedirector() *fakeRedirector {
@@ -152,6 +157,42 @@ func (r *fakeRedirector) Start() bool {
 
 func (r *fakeRedirector) Stop() bool { r.mu.Lock(); r.record("stop"); r.mu.Unlock(); return true }
 
+func (r *fakeRedirector) lastCall() string {
+	if len(r.calls) == 0 {
+		return "nothing"
+	}
+	return r.calls[len(r.calls)-1]
+}
+
+func (r *fakeRedirector) TraceConnections(fn func(ConnEvent)) func() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.traceFn = fn
+	r.traceLog = append(r.traceLog, "on after "+r.lastCall())
+	return func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		r.traceFn = nil
+		r.traceLog = append(r.traceLog, "off after "+r.lastCall())
+	}
+}
+
+// emit delivers a connection decision the way the core's callback would.
+func (r *fakeRedirector) emit(ev ConnEvent) {
+	r.mu.Lock()
+	fn := r.traceFn
+	r.mu.Unlock()
+	if fn != nil {
+		fn(ev)
+	}
+}
+
+func (r *fakeRedirector) traces() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.traceLog...)
+}
+
 func (r *fakeRedirector) snapshot() ([]string, int, int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -210,6 +251,43 @@ type harness struct {
 
 	// proxies, when not nil, enables the system proxy takeover.
 	proxies func() []sysproxy.Endpoint
+
+	// environment is Deps.Environment; observe makes the engines report
+	// their connections (observedEngine).
+	environment func() []string
+	observe     bool
+	observed    []*observedEngine
+}
+
+// observedEngine reports connections like engine.Engine does.
+type observedEngine struct {
+	*fakeEngine
+	omu     sync.Mutex
+	observe func(engine.Request)
+}
+
+func (e *observedEngine) Observe(fn func(engine.Request)) {
+	e.omu.Lock()
+	e.observe = fn
+	e.omu.Unlock()
+}
+
+func (e *observedEngine) report(r engine.Request) {
+	e.omu.Lock()
+	fn := e.observe
+	e.omu.Unlock()
+	if fn != nil {
+		fn(r)
+	}
+}
+
+// Stats reports no open connections once closed, as the real engine does.
+func (e *observedEngine) Stats() engine.Stats {
+	st := e.fakeEngine.Stats()
+	if e.closeCount() > 0 {
+		st.Active = 0
+	}
+	return st
 }
 
 func exampleConfig(t *testing.T) map[string]any {
@@ -267,6 +345,11 @@ func newHarness(t *testing.T, mutate func(*harness)) *harness {
 				user: fmt.Sprintf("session-user-%d", len(h.engines)), password: fmt.Sprintf("session-pass-%d", len(h.engines)),
 			}
 			h.engines = append(h.engines, e)
+			if h.observe {
+				oe := &observedEngine{fakeEngine: e}
+				h.observed = append(h.observed, oe)
+				return oe, nil
+			}
 			return e, nil
 		},
 		LoadRedirector: func() (Redirector, error) { h.loads++; return h.red, nil },
@@ -289,6 +372,7 @@ func newHarness(t *testing.T, mutate func(*harness)) *harness {
 			}, nil
 		},
 		SystemProxies: h.proxies,
+		Environment:   h.environment,
 		System:        h.sys,
 		Checks:        h.fakeChecks(),
 	})

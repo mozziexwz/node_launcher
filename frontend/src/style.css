@@ -877,6 +877,10 @@ dl.check .target {
     color: var(--green);
 }
 
+.log-tag.conn {
+    color: #7a4fa3;
+}
+
 .log-text {
     white-space: pre-wrap;
     overflow-wrap: anywhere;

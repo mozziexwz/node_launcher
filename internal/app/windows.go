@@ -9,10 +9,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mozziexwz/node_launcher/internal/engine"
 	"github.com/mozziexwz/node_launcher/internal/logx"
+	"github.com/mozziexwz/node_launcher/internal/netenv"
 	"github.com/mozziexwz/node_launcher/internal/redirector"
 	"github.com/mozziexwz/node_launcher/internal/store"
 	"github.com/mozziexwz/node_launcher/internal/sysproxy"
@@ -56,6 +58,7 @@ func NewWindows(layout store.Layout, log *logx.Logger, corePath string, prepareR
 		},
 		PrepareRuntime: prepareRuntime,
 		SystemProxies:  sysproxy.Current,
+		Environment:    EnvironmentLines,
 		System:         windowsSystem{},
 	})
 }
@@ -92,6 +95,64 @@ func (a coreAdapter) DeleteRule(id uint32) bool  { return a.core.DeleteRule(id) 
 
 func (a coreAdapter) SetLocalhostProxyPorts(ports []uint16) error {
 	return a.core.SetLocalhostProxyPorts(ports)
+}
+
+// TraceConnections turns on the core's connection callback, with its
+// per-target deduplication, and passes the events to fn on a goroutine of
+// its own. stop turns the callback off and delivers what is still queued.
+func (a coreAdapter) TraceConnections(fn func(ConnEvent)) (stop func()) {
+	events := redirector.Connections()
+	for drained := false; !drained; { // events left from an earlier session
+		select {
+		case <-events:
+		default:
+			drained = true
+		}
+	}
+	deliver := func(ev redirector.Connection) {
+		fn(ConnEvent{Process: ev.Process, DestIP: ev.DestIP, Port: ev.Port, Info: ev.Info})
+	}
+	a.core.SetTrafficLoggingEnabled(true) // the core then reports each target once
+	a.core.EnableConnections(true)
+	quit, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case ev := <-events:
+				deliver(ev)
+			case <-quit:
+				for {
+					select {
+					case ev := <-events:
+						deliver(ev)
+					default:
+						return
+					}
+				}
+			}
+		}
+	}()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			a.core.EnableConnections(false)
+			a.core.SetTrafficLoggingEnabled(false)
+			close(quit)
+			<-done
+		})
+	}
+}
+
+// EnvironmentLines describes the Windows version, the system proxy and the
+// network adapters, for the log at every start and for the support bundle.
+func EnvironmentLines() []string {
+	snap, err := netenv.Collect()
+	lines := []string{"网络环境：" + snap.Windows + "；" + systemProxyText(sysproxy.ReadSettings())}
+	if err != nil {
+		lines = append(lines, "读取网卡信息失败："+err.Error())
+	}
+	return append(lines, snap.Lines()...)
 }
 func (a coreAdapter) Start() bool { return a.core.Start() }
 func (a coreAdapter) Stop() bool  { return a.core.Stop() }

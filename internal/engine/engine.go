@@ -150,11 +150,13 @@ func randomHex(n int) (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// countingListener tracks accepted and still-open SOCKS5 client connections.
+// countingListener tracks accepted and still-open SOCKS5 client connections,
+// and follows them for Observe when an observer is set.
 type countingListener struct {
 	*net.TCPListener
 	accepted atomic.Int64
 	active   atomic.Int64
+	observe  atomic.Pointer[func(Request)]
 }
 
 func (l *countingListener) Accept() (net.Conn, error) {
@@ -164,16 +166,44 @@ func (l *countingListener) Accept() (net.Conn, error) {
 	}
 	l.accepted.Add(1)
 	l.active.Add(1)
-	return &countedConn{Conn: c, active: &l.active}, nil
+	conn := &countedConn{Conn: c, active: &l.active}
+	if fn := l.observe.Load(); fn != nil {
+		conn.watch = newWatch(*fn)
+	}
+	return conn, nil
 }
 
 type countedConn struct {
 	net.Conn
 	active *atomic.Int64
 	once   sync.Once
+	watch  *watch // nil unless observed
 }
 
+func (c *countedConn) Read(p []byte) (int, error) {
+	n, err := c.Conn.Read(p)
+	if c.watch != nil && n > 0 {
+		c.watch.read(p[:n])
+	}
+	return n, err
+}
+
+func (c *countedConn) Write(p []byte) (int, error) {
+	n, err := c.Conn.Write(p)
+	if c.watch != nil && n > 0 {
+		c.watch.wrote(n)
+	}
+	return n, err
+}
+
+// Close reports an observed connection before it stops counting as active,
+// so a caller that waits for no active connections has every report.
 func (c *countedConn) Close() error {
-	c.once.Do(func() { c.active.Add(-1) })
+	c.once.Do(func() {
+		if c.watch != nil {
+			c.watch.done()
+		}
+		c.active.Add(-1)
+	})
 	return c.Conn.Close()
 }
