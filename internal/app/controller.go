@@ -54,6 +54,10 @@ type Redirector interface {
 	// SetLocalhostProxyPorts lists loopback TCP ports that rules may proxy
 	// while other localhost traffic stays direct (patch P4).
 	SetLocalhostProxyPorts(ports []uint16) error
+	// TraceConnections passes the redirector's connection decisions to fn
+	// until stop is called. Call it before Start and call stop only after
+	// Stop: the redirector reads the callback without a lock.
+	TraceConnections(fn func(ConnEvent)) (stop func())
 	Start() bool
 	Stop() bool
 }
@@ -119,8 +123,11 @@ type Deps struct {
 	// SystemProxies, when set, returns the Windows system proxy endpoints;
 	// the game's connections to them are then taken over (sysproxy.go).
 	SystemProxies func() []sysproxy.Endpoint
-	System        System
-	Checks        CheckFuncs
+	// Environment, when set, describes the network for the log at every
+	// start: adapters, addresses, DNS servers and the system proxy.
+	Environment func() []string
+	System      System
+	Checks      CheckFuncs
 }
 
 // State is the acceleration state.
@@ -169,6 +176,10 @@ type session struct {
 	secrets []string
 
 	takeover *proxyTakeover // nil when SystemProxies is not set
+
+	diag      *connDiag
+	stopTrace func() // ends TraceConnections; only after the redirector stopped
+	observed  bool   // the engine reports its connections to diag
 }
 
 // Controller is safe for concurrent use.
@@ -331,6 +342,9 @@ func (c *Controller) SetAddon(id string, on bool) error {
 		if t := c.session.takeover; t != nil {
 			c.updateTakeoverLocked(t, proxiedProcesses(next))
 		}
+		if d := c.session.diag; d != nil {
+			d.setPrograms(proxiedProcesses(next))
+		}
 	}
 	if err := c.deps.Layout.SaveSettings(next); err != nil {
 		return err
@@ -423,6 +437,11 @@ func (c *Controller) startSession(s store.Settings) (sess *session, warnings []s
 		c.log.AddSecret(pw)
 		secrets = append(secrets, pw)
 	}
+	if env := c.deps.Environment; env != nil {
+		for _, line := range env() {
+			c.log.Printf(logx.App, "%s", line)
+		}
+	}
 
 	eng, err := c.deps.StartEngine(cfg)
 	if err != nil {
@@ -435,6 +454,15 @@ func (c *Controller) startSession(s store.Settings) (sess *session, warnings []s
 		secrets = append(secrets, secret)
 	}
 	c.log.Printf(logx.App, "MSBOOST 核心已启动，本地端口 %d", eng.Addr().Port)
+
+	diag := newConnDiag(c.log)
+	diag.setPrograms(proxiedProcesses(s))
+	diag.setProxy(eng.Addr().Port, "加速")
+	observed := false
+	if o, ok := eng.(observer); ok {
+		o.Observe(diag.request)
+		observed = true
+	}
 
 	red, err := c.redirector()
 	if err != nil {
@@ -465,6 +493,7 @@ func (c *Controller) startSession(s store.Settings) (sess *session, warnings []s
 			return nil, nil, err
 		}
 		rules[systemProxyRuleKey] = takeover.ruleID
+		diag.setProxy(takeover.server.Addr().Port, "改由 MSBOOST 接管（系统代理）")
 	}
 	if err := addRule(gameRuleKey, game.ProcessList()); err != nil {
 		return nil, nil, err
@@ -476,6 +505,8 @@ func (c *Controller) startSession(s store.Settings) (sess *session, warnings []s
 			}
 		}
 	}
+	stopTrace := red.TraceConnections(diag.decision)
+	undo = append(undo, stopTrace)
 	if !red.Start() {
 		if sys.DriverUnloading() {
 			return nil, nil, errDriverUnloading
@@ -487,10 +518,29 @@ func (c *Controller) startSession(s store.Settings) (sess *session, warnings []s
 		warnings = append(warnings, "这些游戏进程在加速开始前已在运行："+strings.Join(running, "、")+"。已建立的连接不会被加速，请重启游戏")
 	}
 	c.log.Printf(logx.App, "加速已开始（节点配置 %s）", s.CurrentConfig)
+	for _, w := range warnings {
+		c.log.Printf(logx.App, "提醒：%s", w)
+	}
 	return &session{
 		config: s.CurrentConfig, cfg: cfg, eng: eng, proxyID: proxyID,
 		rules: rules, since: time.Now(), secrets: secrets, takeover: takeover,
+		diag: diag, stopTrace: stopTrace, observed: observed,
 	}, warnings, nil
+}
+
+// observer is implemented by engines that report the connections they serve
+// (engine.Engine); the fakes in tests may leave it out.
+type observer interface {
+	Observe(fn func(engine.Request))
+}
+
+// waitIdle waits up to max for an observed engine's connections to close, so
+// their records are written before the session summary.
+func waitIdle(eng CoreEngine, max time.Duration) {
+	deadline := time.Now().Add(max)
+	for eng.Stats().Active > 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 // How long a start waits for a previous packet driver to finish unloading.
@@ -562,6 +612,9 @@ func (c *Controller) Stop() error {
 	if !red.Stop() {
 		c.log.Printf(logx.App, "分流已处于停止状态")
 	}
+	if sess.stopTrace != nil {
+		sess.stopTrace() // only now: the redirector no longer calls back
+	}
 	ids := make([]uint32, 0, len(sess.rules))
 	for _, id := range sess.rules {
 		ids = append(ids, id)
@@ -581,11 +634,17 @@ func (c *Controller) Stop() error {
 	}
 	stats := sess.eng.Stats()
 	sess.eng.Close()
+	if sess.observed {
+		waitIdle(sess.eng, 2*time.Second)
+	}
 	for _, s := range sess.secrets {
 		c.log.RemoveSecret(s)
 	}
 	c.log.Printf(logx.App, "加速已停止，用时 %v；本次已使用流量 %s",
 		time.Since(started).Round(time.Millisecond), FormatBytes(stats.Upload+stats.Download))
+	if sess.diag != nil {
+		sess.diag.finish()
+	}
 
 	c.mu.Lock()
 	c.state = StateIdle

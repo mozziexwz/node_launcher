@@ -9,20 +9,25 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mozziexwz/node_launcher/internal/engine"
 	"github.com/mozziexwz/node_launcher/internal/logx"
+	"github.com/mozziexwz/node_launcher/internal/netenv"
 	"github.com/mozziexwz/node_launcher/internal/redirector"
 	"github.com/mozziexwz/node_launcher/internal/store"
 	"github.com/mozziexwz/node_launcher/internal/sysproxy"
 	"github.com/mozziexwz/node_launcher/internal/winsys"
 )
 
-// The redirector names itself in a few log lines; the UI only says MSBOOST.
+// Redirector lines shown in Chinese: those that name the redirector (the UI
+// only says MSBOOST) and the impostor bridge's notices (patch P5).
 var redirectorMessages = map[string]string{
 	"ProxyBridge started": "分流核心已启动",
 	"ProxyBridge stopped": "分流核心已停止",
+	"Bridge: another network driver re-sends packets, handing them back":  "检测到本机有其他网络驱动转发数据包，已自动兼容",
+	"Bridge: a packet came back from the other driver, bridge turned off": "数据包在 MSBOOST 和其他网络驱动之间来回转发，已关闭自动兼容；如果加速无效，请导出诊断包联系客服",
 }
 
 func brandRedirectorLine(line string) string {
@@ -56,6 +61,7 @@ func NewWindows(layout store.Layout, log *logx.Logger, corePath string, prepareR
 		},
 		PrepareRuntime: prepareRuntime,
 		SystemProxies:  sysproxy.Current,
+		Environment:    EnvironmentLines,
 		System:         windowsSystem{},
 	})
 }
@@ -92,6 +98,64 @@ func (a coreAdapter) DeleteRule(id uint32) bool  { return a.core.DeleteRule(id) 
 
 func (a coreAdapter) SetLocalhostProxyPorts(ports []uint16) error {
 	return a.core.SetLocalhostProxyPorts(ports)
+}
+
+// TraceConnections turns on the core's connection callback, with its
+// per-target deduplication, and passes the events to fn on a goroutine of
+// its own. stop turns the callback off and delivers what is still queued.
+func (a coreAdapter) TraceConnections(fn func(ConnEvent)) (stop func()) {
+	events := redirector.Connections()
+	for drained := false; !drained; { // events left from an earlier session
+		select {
+		case <-events:
+		default:
+			drained = true
+		}
+	}
+	deliver := func(ev redirector.Connection) {
+		fn(ConnEvent{Process: ev.Process, DestIP: ev.DestIP, Port: ev.Port, Info: ev.Info})
+	}
+	a.core.SetTrafficLoggingEnabled(true) // the core then reports each target once
+	a.core.EnableConnections(true)
+	quit, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case ev := <-events:
+				deliver(ev)
+			case <-quit:
+				for {
+					select {
+					case ev := <-events:
+						deliver(ev)
+					default:
+						return
+					}
+				}
+			}
+		}
+	}()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			a.core.EnableConnections(false)
+			a.core.SetTrafficLoggingEnabled(false)
+			close(quit)
+			<-done
+		})
+	}
+}
+
+// EnvironmentLines describes the Windows version, the system proxy and the
+// network adapters, for the log at every start and for the support bundle.
+func EnvironmentLines() []string {
+	snap, err := netenv.Collect()
+	lines := []string{"网络环境：" + snap.Windows + "；" + systemProxyText(sysproxy.ReadSettings())}
+	if err != nil {
+		lines = append(lines, "读取网卡信息失败："+err.Error())
+	}
+	return append(lines, snap.Lines()...)
 }
 func (a coreAdapter) Start() bool { return a.core.Start() }
 func (a coreAdapter) Stop() bool  { return a.core.Stop() }

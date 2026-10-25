@@ -22,6 +22,7 @@ const (
 	App      Tag = "程序"
 	Core     Tag = "核心"
 	Redirect Tag = "分流"
+	Conn     Tag = "连接" // connection records of the accelerated programs
 )
 
 // Line is one log entry. Seq increases by one per line, so readers can merge

@@ -345,6 +345,14 @@ func (a *App) ExportDiagnostics() (string, error) {
 	for _, c := range conflicts {
 		summary = append(summary, "冲突："+c.Message)
 	}
+	summary = append(summary, app.EnvironmentLines()...)
+	if running, err := winsys.ProcessNames(); err == nil {
+		related := app.RelatedProcesses(running)
+		if len(related) == 0 {
+			related = []string{"无"}
+		}
+		summary = append(summary, "游戏相关进程："+strings.Join(related, "、"))
+	}
 	var buf bytes.Buffer
 	if err := writeDiagnostics(&buf, a.layout, summary); err != nil {
 		return "", err

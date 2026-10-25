@@ -2,8 +2,8 @@ import {useEffect, useMemo, useRef, useState} from 'react'
 import {api, errorText, LogLine} from '../api'
 import {Banner, Card} from '../components'
 
-const tags = ['全部', '程序', '核心', '分流']
-const tagClass: Record<string, string> = {'程序': 'app', '核心': 'core', '分流': 'redirect'}
+const tags = ['全部', '程序', '核心', '分流', '连接']
+const tagClass: Record<string, string> = {'程序': 'app', '核心': 'core', '分流': 'redirect', '连接': 'conn'}
 
 export function Logs(props: {lines: LogLine[]}) {
     const [tag, setTag] = useState('全部')

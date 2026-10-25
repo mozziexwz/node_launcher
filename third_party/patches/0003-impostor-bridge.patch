@@ -1,0 +1,404 @@
+--- a/ProxyBridge.c
++++ b/ProxyBridge.c
+@@ -849,7 +849,8 @@
+                 UINT32 orig_dest_ip;
+                 UINT16 orig_dest_port;
+ 
+-                if (get_connection(dst_port, FALSE, &orig_dest_ip, &orig_dest_port))
++                BOOL tracked = get_connection(dst_port, FALSE, &orig_dest_ip, &orig_dest_port);
++                if (tracked)
+                     tcp_header->SrcPort = htons(orig_dest_port);
+ 
+                 BYTE src_first = (ntohl(ip_header->SrcAddr) >> 24) & 0xFF;
+@@ -862,6 +863,14 @@
+                     ip_header->DstAddr = ip_header->SrcAddr;
+                     ip_header->SrcAddr = temp_addr;
+                     addr.Outbound = FALSE;
++
++                    // MSBOOST patch P5: hand-off counters
++                    if (!tracked)
++                        InterlockedIncrement(&g_handoff_relay_untracked);
++                    if (tcp_header->Syn && tcp_header->Ack)
++                        InterlockedIncrement(&g_handoff_relay_synack);
++                    else if (tcp_header->Rst)
++                        InterlockedIncrement(&g_handoff_relay_rst);
+                 }
+ 
+                 if (tcp_header->Rst)
+@@ -893,6 +902,8 @@
+                     ip_header->DstAddr = ip_header->SrcAddr;
+                     ip_header->SrcAddr = temp_addr;
+                     addr.Outbound = FALSE;
++
++                    handoff_app_packet(packet, packet_len);  // MSBOOST patch P5
+                 }
+ 
+             }
+@@ -1023,6 +1034,9 @@
+                     ip_header->DstAddr = ip_header->SrcAddr;
+                     ip_header->SrcAddr = temp_addr;
+                     addr.Outbound = FALSE;
++
++                    // MSBOOST patch P5: hand-off counters
++                    InterlockedIncrement(tcp_header->Syn && !tcp_header->Ack ? &g_handoff_syn : &g_handoff_not_syn);
+                 }
+                 }
+             }
+@@ -1285,6 +1299,8 @@
+         return FALSE;
+     }
+ 
++    bridge_start();  // MSBOOST patch P5
++
+     // Socket-layer events give the owner PID of each new connection without a table scan.
+     // Optional: if it cannot be opened the lookups fall back to the table.
+     sockmap_start();
+@@ -1451,6 +1467,7 @@
+     memset((void*)port_decided_bitmap, 0, sizeof(port_decided_bitmap));
+     memset((void*)port_direct_bitmap,  0, sizeof(port_direct_bitmap));
+ 
++    bridge_stop();  // MSBOOST patch P5
+     log_message("ProxyBridge stopped");
+ 
+     return TRUE;
+--- /dev/null
++++ b/pb_bridge.c
+@@ -0,0 +1,265 @@
++#include "pb_internal.h"
++
++// MSBOOST patch P5: the impostor bridge, plus counters for the hand-off to the relay.
++//
++// The bridge. The main handle's filter skips packets another driver injected ("impostor"
++// packets), so that two drivers cannot pass a packet back and forth forever. Some machines
++// run a driver that re-injects the packets of established flows: TCP after the handshake,
++// UDP from the first packet. There a proxied connection's SYN still reaches the relay, but
++// every packet after it goes straight to the real server, and QUIC bypasses the proxy
++// altogether. The bridge takes outbound impostor packets below the main handle and injects
++// them again from above it, so the main handle sees every packet as on any other machine
++// (WinDivert passes a packet it injected only to lower priorities, and not as an impostor).
++// Elsewhere it receives nothing. If a packet comes back after that, the other driver
++// re-injects what WinDivert injects and the two would loop: the bridge turns itself off and
++// such packets pass as before.
++//
++// The counters record each step of the hand-off for the summary Stop logs: ProxyBridge.c
++// counts the IPv4 packets it turns around, pb_relay.c what the relay does with the
++// connections that reach it.
++
++#define BRIDGE_RECV_PRIORITY 122   // below the main handle (123, ProxyBridge_Start)
++#define BRIDGE_SEND_PRIORITY 124   // above it
++#define CLOSED_LOG_LIMIT 8         // connections the relay closed that get a log line
++
++volatile LONG g_handoff_syn = 0;              // first SYN of a flow turned to the relay
++volatile LONG g_handoff_not_syn = 0;          // flows whose first packet seen was not a SYN
++volatile LONG g_handoff_relay_synack = 0;     // relay SYN-ACKs turned back to the app
++volatile LONG g_handoff_relay_rst = 0;        // relay RSTs turned back to the app
++volatile LONG g_handoff_relay_untracked = 0;  // relay packets for a port with no tracked flow
++
++static volatile LONG g_app_ack = 0, g_app_data = 0, g_app_fin = 0, g_app_rst = 0;  // later app packets turned to the relay
++static volatile LONG g_accepted = 0;            // turned-around connections the relay handed on
++static volatile LONG g_accepted_loopback = 0;   // loopback connections the relay handed on
++static volatile LONG g_closed_noflow = 0;       // closed: no tracked flow for the peer's port
++static volatile LONG g_closed_peer = 0;         // closed: peer is not the flow's original destination
++
++static volatile LONG g_bridge_tcp_ours = 0, g_bridge_tcp_other = 0;   // handed back: of proxied flows / others
++static volatile LONG g_bridge_udp_ours = 0, g_bridge_udp_other = 0;
++static volatile LONG g_bridge_fail = 0, g_bridge_loop = 0;
++static HANDLE g_bridge_recv = INVALID_HANDLE_VALUE;
++static HANDLE g_bridge_send = INVALID_HANDLE_VALUE;
++static HANDLE g_bridge_thread = NULL;
++static UINT8 g_bridge_packet[WINDIVERT_MTU_MAX];
++
++typedef struct { UINT64 key; DWORD tick; UINT8 ttl; } BRIDGE_SEEN;
++static BRIDGE_SEEN g_bridge_seen[4096];   // packets handed back lately, to spot one coming back
++
++// TRUE when the bridge handed this packet back lately and it came back with a lower TTL
++// (WinDivert lowers the TTL of an impostor packet it injects): the other driver re-injects
++// what WinDivert injects.
++static BOOL bridge_came_back(const WINDIVERT_IPHDR *ip4, const WINDIVERT_IPV6HDR *ip6,
++                             const WINDIVERT_TCPHDR *tcp, const WINDIVERT_UDPHDR *udp, UINT payload)
++{
++    UINT32 parts[6];
++    parts[0] = tcp != NULL ? (((UINT32)tcp->SrcPort << 16) | tcp->DstPort) : (((UINT32)udp->SrcPort << 16) | udp->DstPort);
++    parts[1] = tcp != NULL ? tcp->SeqNum : udp->Checksum;
++    parts[2] = tcp != NULL ? tcp->AckNum : 0;
++    parts[3] = tcp != NULL ? tcp->Checksum : 0;
++    parts[4] = payload;
++    parts[5] = ip4 != NULL ? ip4->Id : (ip6 != NULL ? ip6->FlowLabel1 : 0);
++    UINT64 key = 1469598103934665603ULL;
++    for (int i = 0; i < 6; i++)
++    {
++        key ^= parts[i];
++        key *= 1099511628211ULL;
++    }
++    UINT8 ttl = ip4 != NULL ? ip4->TTL : (ip6 != NULL ? ip6->HopLimit : 0);
++    DWORD now = GetTickCount();
++    BRIDGE_SEEN *e = &g_bridge_seen[(key >> 32) & 4095];
++    BOOL back = e->key == key && now - e->tick < 2000 && ttl < e->ttl;
++    e->key = key;
++    e->tick = now;
++    e->ttl = ttl;
++    return back;
++}
++
++static DWORD WINAPI bridge_thread(LPVOID arg)
++{
++    (void)arg;
++    WINDIVERT_ADDRESS addr;
++    UINT len = 0;
++    BOOL off = FALSE, announced = FALSE;
++    while (1)
++    {
++        if (!WinDivertRecv(g_bridge_recv, g_bridge_packet, (UINT)sizeof(g_bridge_packet), &len, &addr))
++        {
++            DWORD err = GetLastError();
++            if (!running || err == ERROR_INVALID_HANDLE || err == ERROR_NO_DATA || err == ERROR_OPERATION_ABORTED)
++                break;
++            Sleep(5);
++            continue;
++        }
++
++        PWINDIVERT_IPHDR ip4 = NULL;
++        PWINDIVERT_IPV6HDR ip6 = NULL;
++        PWINDIVERT_TCPHDR tcp = NULL;
++        PWINDIVERT_UDPHDR udp = NULL;
++        UINT payload = 0;
++        WinDivertHelperParsePacket(g_bridge_packet, len, &ip4, &ip6, NULL, NULL, NULL, &tcp, &udp, NULL, &payload, NULL, NULL);
++
++        if (!off && (tcp != NULL || udp != NULL))
++        {
++            if (bridge_came_back(ip4, ip6, tcp, udp, payload))
++            {
++                off = TRUE;
++                InterlockedIncrement(&g_bridge_loop);
++                log_message("Bridge: a packet came back from the other driver, bridge turned off");
++                WinDivertShutdown(g_bridge_recv, WINDIVERT_SHUTDOWN_RECV);   // drain what is queued, then stop
++            }
++            else
++            {
++                BOOL v6 = ip6 != NULL;
++                UINT16 sp = ntohs(tcp != NULL ? tcp->SrcPort : udp->SrcPort);
++                BOOL ours = tcp != NULL ? (sp == g_local_relay_port || is_connection_tracked(sp, FALSE, v6))
++                                        : (sp == LOCAL_UDP_RELAY_PORT || is_connection_tracked(sp, TRUE, v6));
++                InterlockedIncrement(tcp != NULL ? (ours ? &g_bridge_tcp_ours : &g_bridge_tcp_other)
++                                                 : (ours ? &g_bridge_udp_ours : &g_bridge_udp_other));
++                if (!announced)
++                {
++                    announced = TRUE;
++                    log_message("Bridge: another network driver re-sends packets, handing them back");
++                }
++                if (WinDivertSend(g_bridge_send, g_bridge_packet, len, NULL, &addr))
++                    continue;
++                if (InterlockedIncrement(&g_bridge_fail) <= 3)
++                    log_message("Bridge: handing a packet back failed (%lu)", GetLastError());
++            }
++        }
++        WinDivertSend(g_bridge_recv, g_bridge_packet, len, NULL, &addr);   // pass on unchanged
++    }
++    return 0;
++}
++
++static void bridge_close(void)
++{
++    if (g_bridge_recv != INVALID_HANDLE_VALUE)
++    {
++        WinDivertShutdown(g_bridge_recv, WINDIVERT_SHUTDOWN_BOTH);
++        WinDivertClose(g_bridge_recv);
++        g_bridge_recv = INVALID_HANDLE_VALUE;
++    }
++    if (g_bridge_thread != NULL)
++    {
++        WaitForSingleObject(g_bridge_thread, 2000);
++        CloseHandle(g_bridge_thread);
++        g_bridge_thread = NULL;
++    }
++    if (g_bridge_send != INVALID_HANDLE_VALUE)
++    {
++        WinDivertClose(g_bridge_send);
++        g_bridge_send = INVALID_HANDLE_VALUE;
++    }
++}
++
++// Called by Start after the main handle is open and before the packet threads run.
++void bridge_start(void)
++{
++    bridge_close();   // left over from a start that failed later on
++
++    volatile LONG *counters[] = {
++        &g_handoff_syn, &g_handoff_not_syn, &g_handoff_relay_synack, &g_handoff_relay_rst, &g_handoff_relay_untracked,
++        &g_app_ack, &g_app_data, &g_app_fin, &g_app_rst,
++        &g_accepted, &g_accepted_loopback, &g_closed_noflow, &g_closed_peer,
++        &g_bridge_tcp_ours, &g_bridge_tcp_other, &g_bridge_udp_ours, &g_bridge_udp_other,
++        &g_bridge_fail, &g_bridge_loop,
++    };
++    for (int i = 0; i < (int)(sizeof(counters) / sizeof(counters[0])); i++)
++        InterlockedExchange(counters[i], 0);
++    ZeroMemory(g_bridge_seen, sizeof(g_bridge_seen));
++
++    g_bridge_send = WinDivertOpen("false", WINDIVERT_LAYER_NETWORK, BRIDGE_SEND_PRIORITY, WINDIVERT_FLAG_SEND_ONLY);
++    if (g_bridge_send != INVALID_HANDLE_VALUE)
++        g_bridge_recv = WinDivertOpen("outbound and impostor and not loopback and (tcp or udp)",
++                                      WINDIVERT_LAYER_NETWORK, BRIDGE_RECV_PRIORITY, 0);
++    if (g_bridge_recv == INVALID_HANDLE_VALUE)
++    {
++        log_message("Bridge unavailable (%lu)", GetLastError());
++        bridge_close();
++        return;
++    }
++    WinDivertSetParam(g_bridge_recv, WINDIVERT_PARAM_QUEUE_LENGTH, 16384);
++    g_bridge_thread = CreateThread(NULL, 0, bridge_thread, NULL, 0, NULL);
++    if (g_bridge_thread == NULL)
++    {
++        log_message("Bridge thread failed (%lu)", GetLastError());
++        bridge_close();
++    }
++}
++
++// Called by Stop once the packet threads and the relay's accept loop have ended.
++void bridge_stop(void)
++{
++    BOOL bridged = g_bridge_recv != INVALID_HANDLE_VALUE;
++    bridge_close();
++
++    log_message("Hand-off summary: %ld IPv4 SYN turned to the relay, %ld flows without a first SYN; "
++                "later app packets turned to the relay: %ld ACK, %ld data, %ld FIN, %ld RST; "
++                "%ld relay SYN-ACK and %ld relay RST turned back, %ld relay packets for no tracked flow; "
++                "relay accepted %ld turned-around and %ld loopback connections, "
++                "closed %ld with no tracked flow and %ld from an unexpected peer",
++        (long)g_handoff_syn, (long)g_handoff_not_syn,
++        (long)g_app_ack, (long)g_app_data, (long)g_app_fin, (long)g_app_rst,
++        (long)g_handoff_relay_synack, (long)g_handoff_relay_rst, (long)g_handoff_relay_untracked,
++        (long)g_accepted, (long)g_accepted_loopback, (long)g_closed_noflow, (long)g_closed_peer);
++    if (bridged)
++        log_message("Bridge summary: handed back packets another driver re-sent: TCP %ld of proxied connections "
++                    "and %ld others, UDP %ld of proxied flows and %ld others (%ld failed)%s",
++            (long)g_bridge_tcp_ours, (long)g_bridge_tcp_other, (long)g_bridge_udp_ours, (long)g_bridge_udp_other,
++            (long)g_bridge_fail, g_bridge_loop ? "; turned off after a packet came back" : "");
++}
++
++// A later packet of a turned-around flow, sent by the app (ProxyBridge.c, tracked branch).
++void handoff_app_packet(const void *packet, UINT len)
++{
++    PWINDIVERT_TCPHDR tcp = NULL;
++    UINT payload = 0;
++    WinDivertHelperParsePacket(packet, len, NULL, NULL, NULL, NULL, NULL, &tcp, NULL, NULL, &payload, NULL, NULL);
++    if (tcp != NULL)
++        InterlockedIncrement(tcp->Rst ? &g_app_rst : tcp->Fin ? &g_app_fin : payload > 0 ? &g_app_data : &g_app_ack);
++}
++
++void handoff_relay_accepted(BOOL loopback)
++{
++    InterlockedIncrement(loopback ? &g_accepted_loopback : &g_accepted);
++}
++
++void handoff_relay_accepted_v6(const struct in6_addr *peer)
++{
++    static const UINT8 lb6[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1};
++    handoff_relay_accepted(memcmp(peer, lb6, 16) == 0);
++}
++
++static void relay_closed(BOOL tracked, const char *peer, UINT16 port, const char *orig_dest)
++{
++    if (!tracked)
++    {
++        if (InterlockedIncrement(&g_closed_noflow) <= CLOSED_LOG_LIMIT)
++            log_message("Relay closed a connection from %s port %u: no tracked flow for that port",
++                peer, (unsigned)port);
++    }
++    else if (InterlockedIncrement(&g_closed_peer) <= CLOSED_LOG_LIMIT)
++        log_message("Relay closed a connection from %s port %u: the flow's original destination is %s",
++            peer, (unsigned)port, orig_dest);
++}
++
++// peer and orig_dest in network byte order; orig_dest is only read when tracked.
++void handoff_relay_closed_v4(BOOL tracked, UINT32 peer, UINT16 port, UINT32 orig_dest)
++{
++    char p[16], o[16] = "?";
++    snprintf(p, sizeof(p), "%d.%d.%d.%d", (int)(peer & 0xFF), (int)((peer >> 8) & 0xFF),
++        (int)((peer >> 16) & 0xFF), (int)((peer >> 24) & 0xFF));
++    if (tracked)
++        snprintf(o, sizeof(o), "%d.%d.%d.%d", (int)(orig_dest & 0xFF), (int)((orig_dest >> 8) & 0xFF),
++            (int)((orig_dest >> 16) & 0xFF), (int)((orig_dest >> 24) & 0xFF));
++    relay_closed(tracked, p, port, o);
++}
++
++void handoff_relay_closed_v6(BOOL tracked, const struct in6_addr *peer, UINT16 port, const UINT8 orig_dest6[16])
++{
++    char p[INET6_ADDRSTRLEN] = "?", o[INET6_ADDRSTRLEN] = "?";
++    inet_ntop(AF_INET6, peer, p, sizeof(p));
++    if (tracked)
++        inet_ntop(AF_INET6, orig_dest6, o, sizeof(o));
++    relay_closed(tracked, p, port, o);
++}
+--- a/pb_internal.h
++++ b/pb_internal.h
+@@ -385,6 +385,17 @@
+ extern volatile LONG g_active_relays;
+ extern volatile LONG g_handler_threads;   // per-connection handshake threads still running (Stop waits for them)
+ 
++// ---- pb_bridge.c (MSBOOST patch P5: impostor bridge and hand-off counters) ----
++extern volatile LONG g_handoff_syn, g_handoff_not_syn;
++extern volatile LONG g_handoff_relay_synack, g_handoff_relay_rst, g_handoff_relay_untracked;
++void bridge_start(void);
++void bridge_stop(void);
++void handoff_app_packet(const void *packet, UINT len);
++void handoff_relay_accepted(BOOL loopback);
++void handoff_relay_accepted_v6(const struct in6_addr *peer);
++void handoff_relay_closed_v4(BOOL tracked, UINT32 peer, UINT16 port, UINT32 orig_dest);
++void handoff_relay_closed_v6(BOOL tracked, const struct in6_addr *peer, UINT16 port, const UINT8 orig_dest6[16]);
++
+ // ---- ProxyBridge.c ----
+ DWORD WINAPI packet_processor(LPVOID arg);
+ DWORD WINAPI cleanup_worker(LPVOID arg);
+--- a/pb_relay.c
++++ b/pb_relay.c
+@@ -515,15 +515,21 @@
+                     conn_config->is_ipv6 = FALSE;
+ 
+                     UINT16 client_port = ntohs(client_addr.sin_port);
+-                    if (get_connection_full(client_port, FALSE, &conn_config->orig_dest_ip, &conn_config->orig_dest_port, &conn_config->proxy_config_id) &&
+-                        relay_peer_ok_v4(client_addr.sin_addr.s_addr, conn_config->orig_dest_ip))
+-                    {
++                    BOOL tracked = get_connection_full(client_port, FALSE, &conn_config->orig_dest_ip, &conn_config->orig_dest_port, &conn_config->proxy_config_id);
++                    if (tracked && relay_peer_ok_v4(client_addr.sin_addr.s_addr, conn_config->orig_dest_ip))
++                    {
++                        handoff_relay_accepted((client_addr.sin_addr.s_addr & 0xFF) == 127);  // MSBOOST patch P5
+                         InterlockedIncrement(&g_handler_threads);
+                         HANDLE conn_thread = CreateThread(NULL, 1, connection_handler, (LPVOID)conn_config, 0, NULL);
+                         if (conn_thread != NULL) { CloseHandle(conn_thread); }
+                         else { InterlockedDecrement(&g_handler_threads); closesocket(client_sock); free(conn_config); }
+                     }
+-                    else { closesocket(client_sock); free(conn_config); }
++                    else
++                    {
++                        handoff_relay_closed_v4(tracked, client_addr.sin_addr.s_addr, client_port,
++                            tracked ? conn_config->orig_dest_ip : 0);  // MSBOOST patch P5
++                        closesocket(client_sock); free(conn_config);
++                    }
+                 }
+                 else { closesocket(client_sock); }
+             }
+@@ -544,15 +550,20 @@
+                     conn_config->is_ipv6 = TRUE;
+ 
+                     UINT16 client_port = ntohs(client_addr6.sin6_port);
+-                    if (get_connection_full_v6(client_port, FALSE, conn_config->orig_dest_ip6, &conn_config->orig_dest_port, &conn_config->proxy_config_id) &&
+-                        relay_peer_ok_v6(&client_addr6.sin6_addr, conn_config->orig_dest_ip6))
+-                    {
++                    BOOL tracked = get_connection_full_v6(client_port, FALSE, conn_config->orig_dest_ip6, &conn_config->orig_dest_port, &conn_config->proxy_config_id);
++                    if (tracked && relay_peer_ok_v6(&client_addr6.sin6_addr, conn_config->orig_dest_ip6))
++                    {
++                        handoff_relay_accepted_v6(&client_addr6.sin6_addr);  // MSBOOST patch P5
+                         InterlockedIncrement(&g_handler_threads);
+                         HANDLE conn_thread = CreateThread(NULL, 1, connection_handler, (LPVOID)conn_config, 0, NULL);
+                         if (conn_thread != NULL) { CloseHandle(conn_thread); }
+                         else { InterlockedDecrement(&g_handler_threads); closesocket(client_sock6); free(conn_config); }
+                     }
+-                    else { closesocket(client_sock6); free(conn_config); }
++                    else
++                    {
++                        handoff_relay_closed_v6(tracked, &client_addr6.sin6_addr, client_port, conn_config->orig_dest_ip6);  // MSBOOST patch P5
++                        closesocket(client_sock6); free(conn_config);
++                    }
+                 }
+                 else { closesocket(client_sock6); }
+             }

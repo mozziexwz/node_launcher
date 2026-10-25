@@ -133,3 +133,25 @@ func RunningMatches(names []string) ([]string, error) {
 	}
 	return found, nil
 }
+
+// ProcessNames returns the image names of the running processes, each once.
+func ProcessNames() ([]string, error) {
+	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer windows.CloseHandle(snap)
+
+	var entry windows.ProcessEntry32
+	entry.Size = uint32(unsafe.Sizeof(entry))
+	seen := make(map[string]bool)
+	var names []string
+	for err = windows.Process32First(snap, &entry); err == nil; err = windows.Process32Next(snap, &entry) {
+		name := windows.UTF16ToString(entry.ExeFile[:])
+		if key := strings.ToLower(name); !seen[key] {
+			seen[key] = true
+			names = append(names, name)
+		}
+	}
+	return names, nil
+}
