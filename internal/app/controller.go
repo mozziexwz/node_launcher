@@ -20,6 +20,7 @@ import (
 
 	"github.com/mozziexwz/node_launcher/internal/engine"
 	"github.com/mozziexwz/node_launcher/internal/logx"
+	"github.com/mozziexwz/node_launcher/internal/netenv"
 	"github.com/mozziexwz/node_launcher/internal/probe"
 	"github.com/mozziexwz/node_launcher/internal/profiles"
 	"github.com/mozziexwz/node_launcher/internal/store"
@@ -94,6 +95,7 @@ type CheckFuncs struct {
 	ResolveEntrance func(address string, timeout time.Duration) (ip, reason string)
 	Entrance        func(ip string, port, count int, timeout time.Duration) probe.Result
 	FullPath        func(p probe.Proxy, addr string, port int, opts probe.FullPathOptions) probe.Result
+	GameDNS         func(ctx context.Context) probe.DNSResult
 }
 
 func (c *CheckFuncs) fillDefaults() {
@@ -109,6 +111,23 @@ func (c *CheckFuncs) fillDefaults() {
 	if c.FullPath == nil {
 		c.FullPath = probe.FullPathLatency
 	}
+	if c.GameDNS == nil {
+		c.GameDNS = gameDNS
+	}
+}
+
+// gameDNS resolves the game's host names through this computer's DNS, and
+// through public resolvers for comparison.
+func gameDNS(ctx context.Context) probe.DNSResult {
+	domains := profiles.GameDomains()
+	queries := make([]probe.DNSQuery, len(domains))
+	for i, d := range domains {
+		queries[i] = probe.DNSQuery{Host: d.Host, Purpose: d.Purpose}
+	}
+	r := probe.CheckDNS(ctx, queries, probe.SystemLookup, probe.PublicLookup)
+	snap, _ := netenv.Collect()
+	r.Servers = snap.DNSServers()
+	return r
 }
 
 // Deps wires the controller to real or fake implementations.
@@ -712,7 +731,7 @@ func (c *Controller) FixConflict(fix string) ([]string, error) {
 	return report, err
 }
 
-// CheckResult holds the three independent network checks.
+// CheckResult holds the four independent network checks.
 type CheckResult struct {
 	ExitIP         string
 	ExitIPError    string
@@ -720,11 +739,13 @@ type CheckResult struct {
 	Entrance       probe.Result
 	GameTarget     string
 	Game           probe.Result
+	DNS            probe.DNSResult
 }
 
-// Check runs the exit-IP lookup, the entrance TCP latency and the full-path
-// game latency. Each is independent: one failing never suppresses another.
-// While idle a temporary core is started for the check (no elevation needed).
+// Check runs the exit-IP lookup, the entrance TCP latency, the full-path game
+// latency and the game's DNS lookups. Each is independent: one failing never
+// suppresses another. While idle a temporary core is started for the check
+// (no elevation needed); the DNS lookups need no core and run alongside.
 func (c *Controller) Check(ctx context.Context) (CheckResult, error) {
 	c.mu.Lock()
 	state, sess, s := c.state, c.session, copySettings(c.settings)
@@ -751,9 +772,12 @@ func (c *Controller) Check(ctx context.Context) (CheckResult, error) {
 		return CheckResult{}, ErrBusy
 	}
 
+	checks := c.deps.Checks
+	dns := make(chan probe.DNSResult, 1)
+	go func() { dns <- checks.GameDNS(ctx) }()
+
 	user, password := eng.Credential()
 	proxy := probe.Proxy{Addr: eng.Addr().String(), User: user, Password: password}
-	checks := c.deps.Checks
 	result := CheckResult{GameTarget: fmt.Sprintf("%s:%d", s.ProbeTarget.Address, s.ProbeTarget.Port)}
 
 	if ip, err := checks.ExitIP(ctx, proxy); err != nil {
@@ -776,9 +800,20 @@ func (c *Controller) Check(ctx context.Context) (CheckResult, error) {
 	}
 
 	result.Game = checks.FullPath(proxy, s.ProbeTarget.Address, s.ProbeTarget.Port, probe.FullPathOptions{})
-	c.log.Printf(logx.App, "网络检测：到游戏服务器 IPv4 %s；到中转 %s；到游戏 %s",
-		orText(result.ExitIP, result.ExitIPError), result.Entrance.Compact(), result.Game.Compact())
+	result.DNS = <-dns
+	dnsText := result.DNS.Compact()
+	if detail := result.DNS.Detail(); detail != "" {
+		dnsText += "：" + detail
+	}
+	c.log.Printf(logx.App, "网络检测：到游戏服务器 IPv4 %s；到中转 %s；到游戏 %s；本机 DNS %s",
+		orText(result.ExitIP, result.ExitIPError), result.Entrance.Compact(), result.Game.Compact(), dnsText)
 	return result, nil
+}
+
+// GameDNS checks whether this computer resolves the game's host names; the
+// support bundle runs it on its own.
+func (c *Controller) GameDNS(ctx context.Context) probe.DNSResult {
+	return c.deps.Checks.GameDNS(ctx)
 }
 
 func orText(value, fallback string) string {

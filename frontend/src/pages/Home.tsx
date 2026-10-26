@@ -136,6 +136,11 @@ export function Home(props: {
             {fixReport.length > 0 && <Banner kind="info" onClose={() => setFixReport([])}>{fixReport.join('；')}</Banner>}
             {error && <Banner kind="error" onClose={() => setError('')}>{error}</Banner>}
             {warnings.map(w => <Banner key={w} kind="warn" onClose={() => setWarnings(ws => ws.filter(x => x !== w))}>{w}</Banner>)}
+            {props.check.result && !props.check.result.dns.ok && (
+                <Banner kind="warn" action={{label: '详情', onClick: props.goCheck}}>
+                    本机 DNS 解析不了游戏域名，游戏可能登录不了。
+                </Banner>
+            )}
 
             <section className="lines">
                 <div className="line">

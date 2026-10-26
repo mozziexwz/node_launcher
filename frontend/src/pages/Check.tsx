@@ -65,7 +65,15 @@ export function CheckPage(props: {overview: Overview, check: CheckState}) {
                             <span className="target">{r.gameTarget}　{r.game.detail}</span>
                         </> : pending}
                     </dd>
+                    <dt>本机 DNS 解析游戏域名</dt>
+                    <dd className={r ? (r.dns.ok ? 'ok' : 'bad') : ''} title={r ? r.dns.failed.join('\n') : undefined}>
+                        {r ? <>
+                            {r.dns.text}
+                            {r.dns.servers.length > 0 && <span className="target">DNS 服务器 {r.dns.servers.join('、')}</span>}
+                        </> : pending}
+                    </dd>
                 </dl>
+                {r && !r.dns.ok && <Banner kind="warn">{r.dns.advice}</Banner>}
             </Card>
         </div>
     )

@@ -43,6 +43,20 @@ func TestAdapterLine(t *testing.T) {
 	}
 }
 
+func TestDNSServers(t *testing.T) {
+	s := Snapshot{Adapters: []Adapter{
+		{Name: "以太网", DNS: []net.IP{net.ParseIP("192.168.11.1"), net.ParseIP("2409:8088::a")}},
+		{Name: "VMnet8"},
+		{Name: "WLAN", DNS: []net.IP{net.ParseIP("192.168.11.1"), net.ParseIP("223.5.5.5")}},
+	}}
+	if got := strings.Join(s.DNSServers(), " "); got != "192.168.11.1 2409:8088::a 223.5.5.5" {
+		t.Fatalf("DNSServers = %q", got)
+	}
+	if got := (Snapshot{}).DNSServers(); got != nil {
+		t.Fatalf("no adapters: %q", got)
+	}
+}
+
 func TestKindAndWindowsName(t *testing.T) {
 	for ifType, want := range map[uint32]string{71: "Wi-Fi", 6: "以太网", 243: "移动网络", 53: "虚拟网卡", 131: "隧道", 23: "拨号", 9: "其他（类型 9）"} {
 		if got := Kind(ifType); got != want {
