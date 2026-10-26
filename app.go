@@ -346,6 +346,7 @@ func (a *App) ExportDiagnostics() (string, error) {
 		summary = append(summary, "冲突："+c.Message)
 	}
 	summary = append(summary, app.EnvironmentLines()...)
+	summary = append(summary, a.ctl.GameDNS(a.ctx).Lines()...)
 	if running, err := winsys.ProcessNames(); err == nil {
 		related := app.RelatedProcesses(running)
 		if len(related) == 0 {

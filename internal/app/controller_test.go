@@ -676,6 +676,7 @@ type checkMode struct {
 	dnsReason     string
 	entranceFails bool
 	missingV2     bool
+	gameDNSFails  bool
 }
 
 var currentCheckMode checkMode
@@ -714,6 +715,18 @@ func (h *harness) fakeChecks() CheckFuncs {
 				return probe.Unavailable("节点未提供兼容的版本 2 全程 TCP 测速服务或服务不可达")
 			}
 			return samples(3, 221250*time.Microsecond)
+		},
+		// Not noted in checkLog: it runs alongside the others, in no fixed order.
+		GameDNS: func(context.Context) probe.DNSResult {
+			local := probe.DNSAnswer{Addrs: []string{"203.0.113.5"}, Duration: 12 * time.Millisecond}
+			if currentCheckMode.gameDNSFails {
+				local = probe.DNSAnswer{Err: "超时", Duration: probe.DNSTimeout}
+			}
+			return probe.DNSResult{Servers: []string{"192.168.1.1"}, Lookups: []probe.DNSLookup{{
+				DNSQuery: probe.DNSQuery{Host: "us-sso.nexon.io", Purpose: "游戏登录"},
+				Local:    local,
+				Public:   probe.DNSAnswer{Addrs: []string{"203.0.113.5"}, Duration: 7 * time.Millisecond},
+			}}}
 		},
 	}
 }
@@ -813,6 +826,25 @@ func TestCheckEntranceProblemsNeverSuppressGame(t *testing.T) {
 				t.Fatalf("IP failure must stay visible: %+v", r)
 			}
 		})
+	}
+}
+
+func TestCheckReportsGameDNS(t *testing.T) {
+	h, r := runCheck(t, checkMode{}, nil)
+	if !r.DNS.OK() || r.DNS.Compact() != "正常（最慢 12 ms）" {
+		t.Fatalf("dns %+v", r.DNS)
+	}
+	if got := h.log.Recent(1)[0].Text; !strings.HasSuffix(got, "；本机 DNS 正常（最慢 12 ms）") {
+		t.Fatalf("log %q", got)
+	}
+
+	h, r = runCheck(t, checkMode{gameDNSFails: true}, nil)
+	if r.DNS.OK() || r.Game.Compact() != "221 ms" || r.Entrance.Compact() != "165 ms" || r.ExitIP != "198.51.100.9" {
+		t.Fatalf("a DNS failure must show without hiding the other checks: %+v", r)
+	}
+	want := "；本机 DNS 解析失败（1 个中 1 个）：us-sso.nexon.io 超时；公共 DNS 能解析"
+	if got := h.log.Recent(1)[0].Text; !strings.HasSuffix(got, want) {
+		t.Fatalf("log %q lacks %q", got, want)
 	}
 }
 

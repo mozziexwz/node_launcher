@@ -74,6 +74,15 @@ export interface Check {
     entrance: Result
     gameTarget: string
     game: Result
+    dns: DNSCheck
+}
+
+export interface DNSCheck {
+    ok: boolean
+    text: string
+    advice: string
+    servers: string[]
+    failed: string[]
 }
 
 export interface LogLine {

@@ -82,6 +82,16 @@ type CheckDTO struct {
 	Entrance       ResultDTO `json:"entrance"`
 	GameTarget     string    `json:"gameTarget"`
 	Game           ResultDTO `json:"game"`
+	DNS            DNSDTO    `json:"dns"`
+}
+
+// DNSDTO is whether this computer resolves the game's host names.
+type DNSDTO struct {
+	OK      bool     `json:"ok"`
+	Text    string   `json:"text"`
+	Advice  string   `json:"advice"` // what to do when it fails, else ""
+	Servers []string `json:"servers"`
+	Failed  []string `json:"failed"` // "us-sso.nexon.io（游戏登录）超时"
 }
 
 type ImportResultDTO struct {
@@ -184,7 +194,20 @@ func toCheckDTO(r app.CheckResult) CheckDTO {
 		ExitIP: r.ExitIP, ExitIPError: r.ExitIPError,
 		EntranceTarget: r.EntranceTarget, Entrance: toResultDTO(r.Entrance),
 		GameTarget: r.GameTarget, Game: toResultDTO(r.Game),
+		DNS: toDNSDTO(r.DNS),
 	}
+}
+
+func toDNSDTO(r probe.DNSResult) DNSDTO {
+	failed := make([]string, 0, len(r.Lookups))
+	for _, l := range r.Failed() {
+		failed = append(failed, fmt.Sprintf("%s（%s）%s", l.Host, l.Purpose, l.Local.Err))
+	}
+	servers := r.Servers
+	if servers == nil {
+		servers = []string{}
+	}
+	return DNSDTO{OK: r.OK(), Text: r.Compact(), Advice: r.Advice(), Servers: servers, Failed: failed}
 }
 
 func toLogLineDTO(l logx.Line) LogLineDTO {

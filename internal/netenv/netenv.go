@@ -35,6 +35,21 @@ func (s Snapshot) Lines() []string {
 	return lines
 }
 
+// DNSServers lists the adapters' DNS servers, each once.
+func (s Snapshot) DNSServers() []string {
+	var servers []string
+	seen := map[string]bool{}
+	for _, a := range s.Adapters {
+		for _, ip := range a.DNS {
+			if text := ip.String(); !seen[text] {
+				seen[text] = true
+				servers = append(servers, text)
+			}
+		}
+	}
+	return servers
+}
+
 // Line formats the adapter, for example
 // "网卡 WLAN（Wi-Fi，Intel(R) Wi-Fi 6 AX201）：IPv4 192.168.43.25；IPv6 2409:8a1c:…（公网）；网关 192.168.43.1；DNS 192.168.43.1".
 func (a Adapter) Line() string {

@@ -138,6 +138,27 @@ func Addons() []Addon {
 	}
 }
 
+// Domain is a host name the game looks up through this computer's own DNS.
+type Domain struct {
+	Host    string
+	Purpose string // what stops working when it cannot be resolved
+}
+
+// GameDomains are the Nexon hosts that the network check and the support
+// bundle resolve. The redirector carries the game's connections, not its
+// lookups: when this computer's DNS cannot resolve these names, the game never
+// connects at all, and acceleration cannot help. On 2026-10-26 a router
+// stopped resolving foreign names; the anti-cheat lost x-csauth and dropped
+// the game, and the next login failed on us-sso.
+func GameDomains() []Domain {
+	return []Domain{
+		{Host: "us-sso.nexon.io", Purpose: "游戏登录"},
+		{Host: "x-csauth.ngs.nexon.com", Purpose: "反作弊"},
+		{Host: "ccu-edge.nexon.io", Purpose: "登录器在线状态"},
+		{Host: "config.na.nexon.com", Purpose: "游戏配置"},
+	}
+}
+
 // Validate checks the profile before it is handed to the redirector.
 func (g Game) Validate() error {
 	if len(g.Processes) == 0 {
