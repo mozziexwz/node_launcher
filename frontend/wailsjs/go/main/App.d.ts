@@ -40,6 +40,8 @@ export function SetAddon(arg1:string,arg2:boolean):Promise<void>;
 
 export function SetProbeTarget(arg1:string,arg2:number):Promise<void>;
 
+export function SetTransport(arg1:string):Promise<void>;
+
 export function ShowWindow():Promise<void>;
 
 export function Start():Promise<Array<string>>;

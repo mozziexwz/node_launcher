@@ -78,6 +78,9 @@ type Settings struct {
 	CurrentConfig string          `json:"currentConfig"`
 	ProbeTarget   ProbeTarget     `json:"probeTarget"`
 	Addons        map[string]bool `json:"addons"`
+	// Transport is the user's choice, engine.TransportTCP or TransportUDP;
+	// empty means TCP. UDP applies only to a configuration with a UDP binding.
+	Transport string `json:"transport,omitempty"`
 }
 
 // DefaultSettings uses the default game's probe target and all addons off.
@@ -114,6 +117,11 @@ func (s Settings) Validate() error {
 		if err := validConfigName(s.CurrentConfig); err != nil {
 			return err
 		}
+	}
+	switch s.Transport {
+	case "", engine.TransportTCP, engine.TransportUDP:
+	default:
+		return fmt.Errorf("未知的连接方式：%q", s.Transport)
 	}
 	return nil
 }
@@ -170,6 +178,7 @@ type ConfigEntry struct {
 	Path     string
 	Profile  string // active profile name
 	Entrance string // "address:port", or the reason no single entrance exists
+	UDP      bool   // the node also serves UDP, so the user may pick it
 	Err      error  // set when the file is not a valid configuration
 }
 
@@ -315,6 +324,7 @@ func describeConfig(name, path string) ConfigEntry {
 		return entry
 	}
 	entry.Profile = cfg.Profile.GetProfileName()
+	_, entry.UDP = cfg.Transports()
 	if t := probe.RelayTargetFromProfile(cfg.Profile); t.Err == "" {
 		entry.Entrance = fmt.Sprintf("%s:%d", t.Address, t.Port)
 	} else {

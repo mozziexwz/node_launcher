@@ -96,6 +96,8 @@ type CheckFuncs struct {
 	Entrance        func(ip string, port, count int, timeout time.Duration) probe.Result
 	FullPath        func(p probe.Proxy, addr string, port int, opts probe.FullPathOptions) probe.Result
 	GameDNS         func(ctx context.Context) probe.DNSResult
+	// Hello is the UDP start's check that the tunnel reaches the node.
+	Hello func(p probe.Proxy, timeout time.Duration) error
 }
 
 func (c *CheckFuncs) fillDefaults() {
@@ -113,6 +115,9 @@ func (c *CheckFuncs) fillDefaults() {
 	}
 	if c.GameDNS == nil {
 		c.GameDNS = gameDNS
+	}
+	if c.Hello == nil {
+		c.Hello = probe.Hello
 	}
 }
 
@@ -171,6 +176,7 @@ type Status struct {
 	UploadRate   int64 // bytes per second
 	DownloadRate int64
 	SystemProxy  []string // system proxy endpoints being taken over
+	Transport    string   // engine.TransportTCP or TransportUDP while accelerating
 	Addons       map[string]bool
 	LastError    string
 }
@@ -186,13 +192,16 @@ var (
 const gameRuleKey = "game"
 
 type session struct {
-	config  string
-	cfg     *engine.Config
-	eng     CoreEngine
-	proxyID uint32
-	rules   map[string]uint32 // gameRuleKey, systemProxyRuleKey or addon ID -> rule id
-	since   time.Time
-	secrets []string
+	config string
+	// cfg is the whole configuration file; the core runs on the bindings
+	// of transport only.
+	cfg       *engine.Config
+	transport string
+	eng       CoreEngine
+	proxyID   uint32
+	rules     map[string]uint32 // gameRuleKey, systemProxyRuleKey or addon ID -> rule id
+	since     time.Time
+	secrets   []string
 
 	takeover *proxyTakeover // nil when SystemProxies is not set
 
@@ -251,6 +260,7 @@ func (c *Controller) statusLocked() Status {
 	st := Status{State: c.state, Config: c.settings.CurrentConfig, LastError: c.lastErr, Addons: copySettings(c.settings).Addons}
 	if c.session != nil {
 		st.Config = c.session.config
+		st.Transport = c.session.transport
 		st.Since = c.session.since
 		stats := c.session.eng.Stats()
 		st.Accepted, st.Active = stats.Accepted, stats.Active
@@ -326,6 +336,54 @@ func (c *Controller) SetProbeTarget(address string, port int) error {
 	c.mu.Unlock()
 	return err
 }
+
+// SetTransport chooses TCP or UDP between the core and the node, for the next
+// start. A configuration without a UDP binding always uses TCP.
+func (c *Controller) SetTransport(transport string) error {
+	if transport != engine.TransportTCP && transport != engine.TransportUDP {
+		return fmt.Errorf("未知的连接方式：%q", transport)
+	}
+	c.mu.Lock()
+	if c.state != StateIdle {
+		c.mu.Unlock()
+		return ErrRunning
+	}
+	next := copySettings(c.settings)
+	next.Transport = transport
+	err := c.deps.Layout.SaveSettings(next)
+	if err == nil {
+		c.settings = next
+	}
+	c.mu.Unlock()
+	if err == nil {
+		c.log.Printf(logx.App, "连接方式改为 %s", strings.ToUpper(transport))
+		c.emit()
+	}
+	return err
+}
+
+// startTransport is how a start reaches the node: UDP when the user chose it
+// and the configuration has a UDP binding, otherwise TCP, unless the
+// configuration has nothing but UDP.
+func startTransport(cfg *engine.Config, chosen string) string {
+	tcp, udp := cfg.Transports()
+	if udp && (chosen == engine.TransportUDP || !tcp) {
+		return engine.TransportUDP
+	}
+	return engine.TransportTCP
+}
+
+// startCore starts the core on the bindings of one transport of cfg.
+func (c *Controller) startCore(cfg *engine.Config, transport string) (CoreEngine, error) {
+	run, err := cfg.ForTransport(transport)
+	if err != nil {
+		return nil, err
+	}
+	return c.deps.StartEngine(run)
+}
+
+// udpCheckTimeout bounds the UDP start's hello, SOCKS5 included.
+const udpCheckTimeout = 5 * time.Second
 
 // SetAddon switches an optional acceleration. While accelerating, the rule
 // is added or removed immediately and applies to new connections.
@@ -462,9 +520,24 @@ func (c *Controller) startSession(s store.Settings) (sess *session, warnings []s
 		}
 	}
 
-	eng, err := c.deps.StartEngine(cfg)
+	transport := startTransport(cfg, s.Transport)
+	eng, err := c.startCore(cfg, transport)
 	if err != nil {
 		return nil, nil, err
+	}
+	// UDP is proven with a hello before any game traffic goes into it; a
+	// node, security group or network that drops UDP falls back to TCP.
+	if transport == engine.TransportUDP {
+		user, password := eng.Credential()
+		if err := c.deps.Checks.Hello(probe.Proxy{Addr: eng.Addr().String(), User: user, Password: password}, udpCheckTimeout); err != nil {
+			eng.Close()
+			c.log.Printf(logx.App, "UDP 连不上节点（%v），本次改用 TCP", err)
+			warnings = append(warnings, "UDP 连不上节点，本次改用 TCP 加速。可能是节点没有放行 UDP，或本机网络限制了 UDP")
+			transport = engine.TransportTCP
+			if eng, err = c.startCore(cfg, transport); err != nil {
+				return nil, nil, err
+			}
+		}
 	}
 	undo = append(undo, func() { eng.Close() })
 	user, password := eng.Credential()
@@ -472,7 +545,7 @@ func (c *Controller) startSession(s store.Settings) (sess *session, warnings []s
 		c.log.AddSecret(secret)
 		secrets = append(secrets, secret)
 	}
-	c.log.Printf(logx.App, "MSBOOST 核心已启动，本地端口 %d", eng.Addr().Port)
+	c.log.Printf(logx.App, "MSBOOST 核心已启动（%s），本地端口 %d", strings.ToUpper(transport), eng.Addr().Port)
 
 	diag := newConnDiag(c.log)
 	diag.setPrograms(proxiedProcesses(s))
@@ -541,7 +614,7 @@ func (c *Controller) startSession(s store.Settings) (sess *session, warnings []s
 		c.log.Printf(logx.App, "提醒：%s", w)
 	}
 	return &session{
-		config: s.CurrentConfig, cfg: cfg, eng: eng, proxyID: proxyID,
+		config: s.CurrentConfig, cfg: cfg, transport: transport, eng: eng, proxyID: proxyID,
 		rules: rules, since: time.Now(), secrets: secrets, takeover: takeover,
 		diag: diag, stopTrace: stopTrace, observed: observed,
 	}, warnings, nil
@@ -740,6 +813,9 @@ type CheckResult struct {
 	GameTarget     string
 	Game           probe.Result
 	DNS            probe.DNSResult
+	// Transport carried the full-path check; the entrance check is a TCP
+	// connect to the same port either way.
+	Transport string
 }
 
 // Check runs the exit-IP lookup, the entrance TCP latency, the full-path game
@@ -753,9 +829,10 @@ func (c *Controller) Check(ctx context.Context) (CheckResult, error) {
 
 	var cfg *engine.Config
 	var eng CoreEngine
+	var transport string
 	switch state {
 	case StateRunning:
-		cfg, eng = sess.cfg, sess.eng
+		cfg, eng, transport = sess.cfg, sess.eng, sess.transport
 	case StateIdle:
 		if s.CurrentConfig == "" {
 			return CheckResult{}, ErrNoConfig
@@ -764,7 +841,9 @@ func (c *Controller) Check(ctx context.Context) (CheckResult, error) {
 		if cfg, err = c.deps.Layout.LoadConfig(s.CurrentConfig); err != nil {
 			return CheckResult{}, err
 		}
-		if eng, err = c.deps.StartEngine(cfg); err != nil {
+		// Without a fallback: a UDP check that fails shows the user why.
+		transport = startTransport(cfg, s.Transport)
+		if eng, err = c.startCore(cfg, transport); err != nil {
 			return CheckResult{}, err
 		}
 		defer eng.Close()
@@ -778,7 +857,7 @@ func (c *Controller) Check(ctx context.Context) (CheckResult, error) {
 
 	user, password := eng.Credential()
 	proxy := probe.Proxy{Addr: eng.Addr().String(), User: user, Password: password}
-	result := CheckResult{GameTarget: fmt.Sprintf("%s:%d", s.ProbeTarget.Address, s.ProbeTarget.Port)}
+	result := CheckResult{GameTarget: fmt.Sprintf("%s:%d", s.ProbeTarget.Address, s.ProbeTarget.Port), Transport: transport}
 
 	if ip, err := checks.ExitIP(ctx, proxy); err != nil {
 		result.ExitIPError = err.Error()
@@ -805,7 +884,7 @@ func (c *Controller) Check(ctx context.Context) (CheckResult, error) {
 	if detail := result.DNS.Detail(); detail != "" {
 		dnsText += "：" + detail
 	}
-	c.log.Printf(logx.App, "网络检测：到游戏服务器 IPv4 %s；到中转 %s；到游戏 %s；本机 DNS %s",
+	c.log.Printf(logx.App, "网络检测（%s）：到游戏服务器 IPv4 %s；到中转 %s；到游戏 %s；本机 DNS %s", strings.ToUpper(transport),
 		orText(result.ExitIP, result.ExitIPError), result.Entrance.Compact(), result.Game.Compact(), dnsText)
 	return result, nil
 }

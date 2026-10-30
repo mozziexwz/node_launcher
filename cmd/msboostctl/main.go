@@ -43,6 +43,7 @@ func usage() {
   use <配置文件名>             选择节点配置
   target <IP:端口>             设置全程测速目标
   addon <discord|steam> <on|off>  可选加速开关
+  transport <tcp|udp>          连接方式；配置里没有 UDP 时总是 TCP
   check                        网络检测：到游戏服务器 IPv4、到中转、到游戏
   run [-duration 30m]          开始加速，Ctrl+C 停止（需要管理员）
   clean                        清理驱动、防火墙规则与运行文件（需要管理员）
@@ -110,7 +111,7 @@ func setup(fs *flag.FlagSet, args []string) (*env, []string, error) {
 func run(cmd string, args []string) error {
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	switch cmd {
-	case "status", "configs", "import", "import-legacy", "use", "target", "addon", "check", "run", "clean":
+	case "status", "configs", "import", "import-legacy", "use", "target", "addon", "transport", "check", "run", "clean":
 	default:
 		usage()
 		return fmt.Errorf("未知命令 %q", cmd)
@@ -174,6 +175,15 @@ func run(cmd string, args []string) error {
 		}
 		fmt.Printf("%s：%s\n", rest[0], rest[1])
 		return nil
+	case "transport":
+		if len(rest) != 1 || (rest[0] != "tcp" && rest[0] != "udp") {
+			return errors.New("用法：msboostctl transport <tcp|udp>")
+		}
+		if err := e.ctl.SetTransport(rest[0]); err != nil {
+			return err
+		}
+		fmt.Printf("连接方式：%s\n", strings.ToUpper(rest[0]))
+		return nil
 	case "check":
 		return cmdCheck(e)
 	case "run":
@@ -209,6 +219,11 @@ func cmdStatus(e *env) error {
 	fmt.Printf("数据目录：%s\n", e.layout.Root)
 	fmt.Printf("当前配置：%s\n", orNone(s.CurrentConfig))
 	fmt.Printf("全程测速目标：%s:%d\n", s.ProbeTarget.Address, s.ProbeTarget.Port)
+	transport := "TCP"
+	if s.Transport == "udp" {
+		transport = "UDP（配置里有 UDP 时）"
+	}
+	fmt.Printf("连接方式：%s\n", transport)
 	for _, a := range profiles.Addons() {
 		fmt.Printf("可选加速 %s：%v\n", a.Name, s.Addons[a.ID])
 	}
@@ -286,7 +301,7 @@ func cmdCheck(e *env) error {
 		fmt.Printf("当前到游戏服务器 IPv4：%s\n", r.ExitIP)
 	}
 	fmt.Printf("当前到中转服务器延迟：%s　%s\n", r.Entrance.Compact(), detail(r.EntranceTarget, r.Entrance.Detail()))
-	fmt.Printf("当前到游戏服务器延迟：%s　%s\n", r.Game.Compact(), detail(r.GameTarget, r.Game.Detail()))
+	fmt.Printf("当前到游戏服务器延迟（%s）：%s　%s\n", strings.ToUpper(r.Transport), r.Game.Compact(), detail(r.GameTarget, r.Game.Detail()))
 	return nil
 }
 
