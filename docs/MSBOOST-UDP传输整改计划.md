@@ -3,7 +3,7 @@
 > 日期：2026-10-30
 > 涉及：MSBOOST 项目（MSBOOST.DE）的节点安装脚本、执行机、网站和中转；MSBOOST 启动器（MSBOOST-Launcher.exe）；MSBOOST 本地版
 > 代码基准：MSBOOST.DE `3e00d8f`，启动器 `133edcd`；启动器内嵌 mieru v3.39.0，节点用 mihomo v1.19.33（内置 mieru v3.38.1）。文中行号以这些版本为准，mieru 的行号按 v3.39.0
-> 状态：方案，尚未实施
+> 状态：第一阶段已在 `feat/udp-transport` 分支实施（第 10 节），尚未实机验证；本地版和第二阶段未做
 
 ## 1. 结论
 
@@ -244,3 +244,36 @@ mieru 客户端每建一条底层连接，都从所有绑定里随机挑一个�
 | 旧版启动器混用 | v1.1.2 及更早不筛选绑定 | 先发启动器；网站提示；发布说明 |
 | 其他 mieru 客户端 | 不经启动器、直接导入 `直连.json` 时同样会混用 | 不在支持范围 |
 | 分流核心的开销 | 分流核心本来就检查所有外发的 TCP 和 UDP 包（`third_party/ProxyBridge/Windows/src/ProxyBridge.c:1220`），改用 UDP 后，启动器自己发往节点的包也要经它放行，和现在的 TCP 包一样 | 实机测 CPU 占用和延迟 |
+
+## 10. 第一阶段实施记录（2026-10-30）
+
+两个仓库的 `feat/udp-transport` 分支都包含这次的版本升级：MSBOOST.DE 的 mihomo v1.19.33，启动器的 mieru v3.39.0。
+
+### 10.1 和计划不同的两处
+
+- **安装脚本用 `MSBOOST_UDP=1` 显式开启 UDP。**
+  - 原因：项目约定旧执行机必须能继续领取部署任务（`internal/control/tasks_test.go` 的 `TestLegacyExecutorStillClaimsNonRelayJobs`）。旧执行机解析不了双绑定配置，如果安装脚本默认开 UDP，它会在装完节点后报“配置格式不符合要求”。
+  - 新版执行机在部署和升级时都带 `MSBOOST_UDP=1`，所以网站部署的节点默认同时开 TCP 和 UDP，用户不用选。
+  - 不带这个变量时，重装沿用 install.env 里记录的 `UDP`；全新安装只开 TCP。
+- **控制面新增执行机能力 `node_udp_v1`**（请求头 `X-MSBOOST-Node-UDP`）。只有任务里带的配置有 UDP 绑定时才要求这项能力，例如用 UDP 节点的配置建中转。部署、升级和取回配置不要求。
+
+### 10.2 已完成
+
+- **安装脚本**：同端口第二个 mieru 监听；traffic-pattern 一律写 nonce；端口检查和启动后检查都包括 UDP；只在 UDP 端口空闲或由本服务占用时开 UDP；自测增加经 UDP 出站的 hello（`IN-NAME` 分流）；UFW/firewalld 的 UDP 规则单独记录归属，回滚、换端口、改成只开 TCP 时一并处理；install.env 增加 `UDP` 和三项 UDP 规则归属。
+- **执行机**：解析“TCP 加同端口 UDP”；中转改写只留 TCP；部署、升级和取回配置结果增加 `publicUDP`（经 UDP 隧道向 `127.0.0.1:20424` 发 hello）；清理时删除 UDP 规则。
+- **网站**：检查结果加“公网 UDP 可达性”一行，没有这一项的旧结果不显示；配置带 UDP 时，下载处提示需要最新版启动器；上传配置接受双绑定。
+- **启动器**：
+  - 设置 `transport`；
+  - 加速页“节点配置”一行右侧的 TCP/UDP 切换，只在当前配置带 UDP 时显示；
+  - 启动时只保留选中的绑定；UDP 先发 hello，最多 5 秒，失败就改用 TCP 并提示；
+  - 网络检测按所选方式运行，并写明用的是哪种；
+  - 配置页标出“支持 UDP”；
+  - `msboostctl transport <tcp|udp>`。
+- **测试**：两个仓库的单元测试全部通过，MSBOOST.DE 的 HTTP 和浏览器测试也全部通过。新增的测试覆盖：生成的配置、UDP 开关的判断、防火墙规则归属和回滚、配置解析、公网 UDP 检查、能力要求、绑定筛选、启动退回 TCP 和网络检测。
+
+### 10.3 还没做或没验证
+
+- **本地版**：要等 MSBOOST.DE 发出包含这些改动的标签，再用 `syncnode` 同步。另外本地版自己的部署代码也要带 `MSBOOST_UDP=1`，并改 `local_*.go`、前端页面和使用指南 `local.html` 里的“放行 TCP 端口”。
+- **实机**：同一端口两个 mieru 监听、UDP 自测、公网 UDP 检查、Windows 上 UDP 加速和退回，都还没在真实 VPS 和电脑上跑过（第 7、8 节）。
+- **执行机需要升级**：旧执行机部署出来的仍是只有 TCP 的节点，公网 UDP 也不会显示。
+- **发版时补上**：发布说明，以及启动器使用指南里的连接方式说明。
