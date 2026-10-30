@@ -2,7 +2,7 @@
 
 > 日期：2026-10-30
 > 涉及：MSBOOST 项目（MSBOOST.DE）的节点安装脚本、执行机、网站和中转；MSBOOST 启动器（MSBOOST-Launcher.exe）；MSBOOST 本地版
-> 代码基准：MSBOOST.DE `3e00d8f`，启动器 `133edcd`，mieru v3.38.1，mihomo v1.19.32。文中行号以这些版本为准
+> 代码基准：MSBOOST.DE `3e00d8f`，启动器 `133edcd`；启动器内嵌 mieru v3.39.0，节点用 mihomo v1.19.33（内置 mieru v3.38.1）。文中行号以这些版本为准，mieru 的行号按 v3.39.0
 > 状态：方案，尚未实施
 
 ## 1. 结论
@@ -50,7 +50,7 @@
 
 ### 2.2 为什么启动时只能留一个绑定
 
-mieru 客户端每建一条底层连接，都从所有绑定里随机挑一个（mieru `pkg/protocol/mux.go:670`）。两个绑定都留着，TCP 和 UDP 会混着用；网络挡 UDP 时，大约一半连接会失败。所以启动器启动前要去掉没选中的绑定。
+mieru 客户端每建一条底层连接，都从所有绑定里随机挑一个（mieru `pkg/protocol/mux.go:689`）。两个绑定都留着，TCP 和 UDP 会混着用；网络挡 UDP 时，大约一半连接会失败。所以启动器启动前要去掉没选中的绑定。
 
 ### 2.3 v1.1.2 及更早的启动器
 
