@@ -1170,3 +1170,38 @@ func TestCheckRunsOnTheChosenTransport(t *testing.T) {
 	}
 	h.allEnginesClosed(t)
 }
+
+// Seen on a real node whose UDP was dropped: the exit IP and the game check
+// time out through the tunnel while the entrance answers TCP. Over UDP that
+// is UDP being dropped; over TCP the original reasons stand.
+func TestCheckBlamesUDPWhenOnlyTCPAnswers(t *testing.T) {
+	dual := func(h *harness) { writeConfig(t, h.layout, "直连.json", dualConfig(t)) }
+	for _, transport := range []string{engine.TransportUDP, engine.TransportTCP} {
+		t.Run(transport, func(t *testing.T) {
+			currentCheckMode = checkMode{ipFails: true, missingV2: true}
+			t.Cleanup(func() { currentCheckMode = checkMode{} })
+			h := newHarness(t, dual)
+			if err := h.c.SetTransport(transport); err != nil {
+				t.Fatal(err)
+			}
+			r, err := h.c.Check(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			blamed := r.ExitIPError == udpBlocked && r.Game.Compact() == "未测得："+udpBlocked
+			if blamed != (transport == engine.TransportUDP) || r.Entrance.SuccessCount == 0 {
+				t.Fatalf("%s: exit IP %q, game %q", transport, r.ExitIPError, r.Game.Compact())
+			}
+		})
+	}
+	// A node that is down altogether keeps the original reasons over UDP too.
+	currentCheckMode = checkMode{ipFails: true, missingV2: true, entranceFails: true}
+	t.Cleanup(func() { currentCheckMode = checkMode{} })
+	h := newHarness(t, dual)
+	if err := h.c.SetTransport(engine.TransportUDP); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := h.c.Check(context.Background()); err != nil || r.ExitIPError == udpBlocked {
+		t.Fatalf("down node blamed on UDP: %v %q", err, r.ExitIPError)
+	}
+}

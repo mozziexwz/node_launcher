@@ -385,6 +385,9 @@ func (c *Controller) startCore(cfg *engine.Config, transport string) (CoreEngine
 // udpCheckTimeout bounds the UDP start's hello, SOCKS5 included.
 const udpCheckTimeout = 5 * time.Second
 
+// udpBlocked is the network check's reason when only TCP reaches the node.
+const udpBlocked = "经 UDP 连不上节点，可能是节点没有放行 UDP，或本机网络限制了 UDP；可改用 TCP"
+
 // SetAddon switches an optional acceleration. While accelerating, the rule
 // is added or removed immediately and applies to new connections.
 func (c *Controller) SetAddon(id string, on bool) error {
@@ -879,6 +882,12 @@ func (c *Controller) Check(ctx context.Context) (CheckResult, error) {
 	}
 
 	result.Game = checks.FullPath(proxy, s.ProbeTarget.Address, s.ProbeTarget.Port, probe.FullPathOptions{})
+	// Nothing came back through a UDP tunnel while the same port answers TCP:
+	// UDP is dropped on the way, the node's probe is not what is missing.
+	if transport == engine.TransportUDP && result.ExitIPError != "" && result.Game.SuccessCount == 0 && result.Entrance.SuccessCount > 0 {
+		result.ExitIPError = udpBlocked
+		result.Game = probe.Unavailable(udpBlocked)
+	}
 	result.DNS = <-dns
 	dnsText := result.DNS.Compact()
 	if detail := result.DNS.Detail(); detail != "" {
