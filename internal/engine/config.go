@@ -12,6 +12,14 @@ import (
 	"github.com/enfein/mieru/v3/pkg/appctl"
 	"github.com/enfein/mieru/v3/pkg/appctl/appctlpb"
 	"github.com/enfein/mieru/v3/pkg/common"
+	"google.golang.org/protobuf/proto"
+)
+
+// Transports between the core and the node. A node that serves UDP lists a
+// UDP binding next to its TCP one, on the same port.
+const (
+	TransportTCP = "tcp"
+	TransportUDP = "udp"
 )
 
 // Config is a validated mieru client configuration and its active profile.
@@ -47,4 +55,48 @@ func ParseConfig(b []byte) (*Config, error) {
 		return nil, fmt.Errorf("找不到当前使用的配置方案：%w", err)
 	}
 	return &Config{Client: client, Profile: profile}, nil
+}
+
+// Transports reports which transports the active profile has bindings for.
+func (c *Config) Transports() (tcp, udp bool) {
+	for _, s := range c.Profile.GetServers() {
+		for _, b := range s.GetPortBindings() {
+			switch b.GetProtocol() {
+			case appctlpb.TransportProtocol_TCP:
+				tcp = true
+			case appctlpb.TransportProtocol_UDP:
+				udp = true
+			}
+		}
+	}
+	return tcp, udp
+}
+
+// ForTransport returns a copy whose active profile keeps only the bindings
+// of one transport. mieru picks a random binding for every underlying
+// connection, so a profile with both would mix them. c is not changed.
+func (c *Config) ForTransport(transport string) (*Config, error) {
+	want := appctlpb.TransportProtocol_TCP
+	if transport == TransportUDP {
+		want = appctlpb.TransportProtocol_UDP
+	}
+	profile := proto.Clone(c.Profile).(*appctlpb.ClientProfile)
+	var servers []*appctlpb.ServerEndpoint
+	for _, s := range profile.GetServers() {
+		var kept []*appctlpb.PortBinding
+		for _, b := range s.GetPortBindings() {
+			if b.GetProtocol() == want {
+				kept = append(kept, b)
+			}
+		}
+		if len(kept) > 0 {
+			s.PortBindings = kept
+			servers = append(servers, s)
+		}
+	}
+	if len(servers) == 0 {
+		return nil, fmt.Errorf("节点配置里没有 %s 端口", want)
+	}
+	profile.Servers = servers
+	return &Config{Client: c.Client, Profile: profile}, nil
 }

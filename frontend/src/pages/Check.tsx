@@ -62,7 +62,7 @@ export function CheckPage(props: {overview: Overview, check: CheckState}) {
                     <dd className={r ? (r.game.ok ? 'ok' : 'bad') : ''}>
                         {r ? <>
                             {r.game.text}
-                            <span className="target">{r.gameTarget}　{r.game.detail}</span>
+                            <span className="target">{r.gameTarget}　经 {r.transport.toUpperCase()}　{r.game.detail}</span>
                         </> : pending}
                     </dd>
                     <dt>本机 DNS 解析游戏域名</dt>

@@ -59,7 +59,7 @@ export function Configs(props: {
                                 </div>
                                 {c.error
                                     ? <div className="bad small">无效：{c.error}</div>
-                                    : <div className="muted small">入口 {c.entrance}</div>}
+                                    : <div className="muted small">入口 {c.entrance}{c.udp && ' · 支持 UDP'}</div>}
                             </div>
                             <div className="config-actions">
                                 {!c.error && !c.current && (

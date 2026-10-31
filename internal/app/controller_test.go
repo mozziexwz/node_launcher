@@ -246,6 +246,11 @@ type harness struct {
 	checkLog []string
 	mu       sync.Mutex
 
+	// startedWith is the configuration of every core start; helloErr is
+	// what the UDP start's hello returns.
+	startedWith []*engine.Config
+	helloErr    error
+
 	runtimeErr error
 	runtimeLog []string // "lock", then "unlock after <last redirector call>"
 
@@ -334,12 +339,13 @@ func newHarness(t *testing.T, mutate func(*harness)) *harness {
 	h.c = New(Deps{
 		Layout: h.layout,
 		Log:    h.log,
-		StartEngine: func(*engine.Config) (CoreEngine, error) {
+		StartEngine: func(cfg *engine.Config) (CoreEngine, error) {
 			h.mu.Lock()
 			defer h.mu.Unlock()
 			if h.engErr != nil {
 				return nil, h.engErr
 			}
+			h.startedWith = append(h.startedWith, cfg)
 			e := &fakeEngine{
 				addr: &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 40000 + len(h.engines)},
 				user: fmt.Sprintf("session-user-%d", len(h.engines)), password: fmt.Sprintf("session-pass-%d", len(h.engines)),
@@ -716,6 +722,10 @@ func (h *harness) fakeChecks() CheckFuncs {
 			}
 			return samples(3, 221250*time.Microsecond)
 		},
+		Hello: func(p probe.Proxy, _ time.Duration) error {
+			note("hello " + p.Addr + " " + p.User)
+			return h.helloErr
+		},
 		// Not noted in checkLog: it runs alongside the others, in no fixed order.
 		GameDNS: func(context.Context) probe.DNSResult {
 			local := probe.DNSAnswer{Addrs: []string{"203.0.113.5"}, Duration: 12 * time.Millisecond}
@@ -1034,5 +1044,164 @@ func TestStartWaitsForUnloadingDriver(t *testing.T) {
 	}
 	if len(h.engines) != 1 {
 		t.Fatalf("nothing may start while waiting (%d engines)", len(h.engines))
+	}
+}
+
+// ---- transport ----
+
+// dualConfig is the example as a node that serves UDP writes it.
+func dualConfig(t *testing.T) map[string]any {
+	t.Helper()
+	m := exampleConfig(t)
+	server := m["profiles"].([]any)[0].(map[string]any)["servers"].([]any)[0].(map[string]any)
+	server["portBindings"] = append(server["portBindings"].([]any), map[string]any{"port": 8964, "protocol": "UDP"})
+	return m
+}
+
+func boundProtocols(cfg *engine.Config) string {
+	var out []string
+	for _, s := range cfg.Profile.GetServers() {
+		for _, b := range s.GetPortBindings() {
+			out = append(out, b.GetProtocol().String())
+		}
+	}
+	return strings.Join(out, ",")
+}
+
+// UDP is used only when chosen and offered. The core never gets both
+// bindings, and a hello proves UDP before the redirector sends anything.
+func TestStartPicksTheTransport(t *testing.T) {
+	for _, c := range []struct {
+		name      string
+		dual      bool
+		chosen    string
+		helloErr  error
+		started   string // bindings of each core start
+		transport string
+		hellos    int
+		fellBack  bool
+	}{
+		{"TCP-only configuration", false, engine.TransportUDP, nil, "TCP", "tcp", 0, false},
+		{"TCP chosen", true, engine.TransportTCP, nil, "TCP", "tcp", 0, false},
+		{"UDP", true, engine.TransportUDP, nil, "UDP", "udp", 1, false},
+		{"UDP falls back to TCP", true, engine.TransportUDP, errors.New("hello timed out"), "UDP TCP", "tcp", 1, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t, func(h *harness) {
+				if c.dual {
+					writeConfig(t, h.layout, "直连.json", dualConfig(t))
+				}
+				h.helloErr = c.helloErr
+			})
+			if err := h.c.SetTransport(c.chosen); err != nil {
+				t.Fatal(err)
+			}
+			warnings, err := h.c.Start()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var started []string
+			for _, cfg := range h.startedWith {
+				started = append(started, boundProtocols(cfg))
+			}
+			if strings.Join(started, " ") != c.started {
+				t.Fatalf("core started on %v, want %s", started, c.started)
+			}
+			if st := h.c.Status(); st.Transport != c.transport {
+				t.Fatalf("status transport %q, want %q", st.Transport, c.transport)
+			}
+			if got := strings.Count(h.calls(), "hello "); got != c.hellos {
+				t.Fatalf("%d hellos, want %d", got, c.hellos)
+			}
+			if fellBack := len(warnings) == 1 && strings.Contains(warnings[0], "改用 TCP"); fellBack != c.fellBack || (!c.fellBack && len(warnings) != 0) {
+				t.Fatalf("warnings %v", warnings)
+			}
+			// The redirector points at the core that stays up.
+			calls, _, _ := h.red.snapshot()
+			if want := fmt.Sprintf("add-socks5 127.0.0.1:%d ", 40000+len(h.engines)-1); !strings.Contains(strings.Join(calls, "\n"), want) {
+				t.Fatalf("redirector calls %v, want %s", calls, want)
+			}
+			if err := h.c.Stop(); err != nil {
+				t.Fatal(err)
+			}
+			h.allEnginesClosed(t)
+		})
+	}
+}
+
+func TestSetTransportOnlyWhileIdle(t *testing.T) {
+	h := newHarness(t, nil)
+	if err := h.c.SetTransport("quic"); err == nil {
+		t.Fatal("an unknown transport was accepted")
+	}
+	if _, err := h.c.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.c.SetTransport(engine.TransportUDP); !errors.Is(err, ErrRunning) {
+		t.Fatalf("changing the transport while accelerating: %v", err)
+	}
+	if err := h.c.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.c.SetTransport(engine.TransportUDP); err != nil || h.c.Settings().Transport != engine.TransportUDP {
+		t.Fatalf("SetTransport: %v %q", err, h.c.Settings().Transport)
+	}
+	if s, err := h.layout.LoadSettings(); err != nil || s.Transport != engine.TransportUDP {
+		t.Fatalf("saved transport %q %v", s.Transport, err)
+	}
+}
+
+// An idle check runs on the chosen transport, without the start's fallback,
+// and still measures the entrance with a TCP connect to the same port.
+func TestCheckRunsOnTheChosenTransport(t *testing.T) {
+	h := newHarness(t, func(h *harness) { writeConfig(t, h.layout, "直连.json", dualConfig(t)) })
+	if err := h.c.SetTransport(engine.TransportUDP); err != nil {
+		t.Fatal(err)
+	}
+	r, err := h.c.Check(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Transport != engine.TransportUDP || len(h.startedWith) != 1 || boundProtocols(h.startedWith[0]) != "UDP" {
+		t.Fatalf("check transport %q, core on %v", r.Transport, h.startedWith)
+	}
+	if r.EntranceTarget != "192.0.2.10:8964" || strings.Contains(h.calls(), "hello ") {
+		t.Fatalf("entrance %q, calls %s", r.EntranceTarget, h.calls())
+	}
+	h.allEnginesClosed(t)
+}
+
+// Seen on a real node whose UDP was dropped: the exit IP and the game check
+// time out through the tunnel while the entrance answers TCP. Over UDP that
+// is UDP being dropped; over TCP the original reasons stand.
+func TestCheckBlamesUDPWhenOnlyTCPAnswers(t *testing.T) {
+	dual := func(h *harness) { writeConfig(t, h.layout, "直连.json", dualConfig(t)) }
+	for _, transport := range []string{engine.TransportUDP, engine.TransportTCP} {
+		t.Run(transport, func(t *testing.T) {
+			currentCheckMode = checkMode{ipFails: true, missingV2: true}
+			t.Cleanup(func() { currentCheckMode = checkMode{} })
+			h := newHarness(t, dual)
+			if err := h.c.SetTransport(transport); err != nil {
+				t.Fatal(err)
+			}
+			r, err := h.c.Check(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			blamed := r.ExitIPError == udpBlocked && r.Game.Compact() == "未测得："+udpBlocked
+			if blamed != (transport == engine.TransportUDP) || r.Entrance.SuccessCount == 0 {
+				t.Fatalf("%s: exit IP %q, game %q", transport, r.ExitIPError, r.Game.Compact())
+			}
+		})
+	}
+	// A node that is down altogether keeps the original reasons over UDP too.
+	currentCheckMode = checkMode{ipFails: true, missingV2: true, entranceFails: true}
+	t.Cleanup(func() { currentCheckMode = checkMode{} })
+	h := newHarness(t, dual)
+	if err := h.c.SetTransport(engine.TransportUDP); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := h.c.Check(context.Background()); err != nil || r.ExitIPError == udpBlocked {
+		t.Fatalf("down node blamed on UDP: %v %q", err, r.ExitIPError)
 	}
 }

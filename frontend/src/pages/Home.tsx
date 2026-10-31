@@ -1,5 +1,5 @@
 import {useState} from 'react'
-import {api, errorText, Overview} from '../api'
+import {api, errorText, Overview, Transport} from '../api'
 import {Banner, Spinner, Switch} from '../components'
 import {canCheck, CheckState, checkLabel, shortResult} from './Check'
 
@@ -50,6 +50,10 @@ export function Home(props: {
 
     const hasCurrent = validConfigs.some(c => c.current)
     const canStart = !busy && o.elevated && !o.lockError && hasCurrent && blocking.length === 0
+    // Only a node that serves UDP offers the choice. While accelerating the
+    // control shows what is in use, which is TCP after a UDP fallback.
+    const offersUDP = validConfigs.some(c => c.current && c.udp)
+    const shownTransport: Transport = st.state === 'idle' || !st.transport ? o.transport : st.transport
 
     const toggle = async () => {
         setError('')
@@ -75,6 +79,16 @@ export function Home(props: {
         setError('')
         try {
             await api.selectConfig(name)
+        } catch (e) {
+            setError(errorText(e))
+        }
+        await props.refresh()
+    }
+
+    const chooseTransport = async (t: Transport) => {
+        setError('')
+        try {
+            await api.setTransport(t)
         } catch (e) {
             setError(errorText(e))
         }
@@ -118,8 +132,11 @@ export function Home(props: {
         return {label: fixLabels[fix] ?? '自动处理', onClick: () => fixConflict(fix), busy: fixing === fix}
     }
 
-    const note = running ? (st.systemProxy && st.systemProxy.length > 0
-            ? `已接管系统代理 ${st.systemProxy.join('、')}：游戏发往它的请求改由 MSBOOST 发出` : '')
+    const note = running ? [
+            st.transport === 'udp' ? '经 UDP 连接节点' : '',
+            st.systemProxy && st.systemProxy.length > 0
+                ? `已接管系统代理 ${st.systemProxy.join('、')}：游戏发往它的请求改由 MSBOOST 发出` : '',
+        ].filter(Boolean).join('；')
         : st.state === 'starting' ? '正在连接 MSBOOST 节点并加载分流驱动…'
         : st.state === 'stopping' ? '正在断开连接并卸载分流驱动…'
         : !hasCurrent ? '请先在上方选择节点配置'
@@ -155,7 +172,18 @@ export function Home(props: {
                                 {validConfigs.map(c => <option key={c.name} value={c.name}>{c.name.replace(/\.json$/i, '')}</option>)}
                             </select>
                         )}
-                    <button className="link" onClick={props.goConfigs}>管理</button>
+                    <span className="line-actions">
+                        {offersUDP && (
+                            <div className="segmented compact" role="group" aria-label="连接方式"
+                                 title={st.state !== 'idle' ? '加速中不能切换连接方式，请先停止加速' : 'UDP 连不上节点时会自动改用 TCP'}>
+                                {(['tcp', 'udp'] as Transport[]).map(t => (
+                                    <button key={t} className={t === shownTransport ? 'on' : ''} disabled={st.state !== 'idle'}
+                                            onClick={() => t !== o.transport && chooseTransport(t)}>{t.toUpperCase()}</button>
+                                ))}
+                            </div>
+                        )}
+                        <button className="link" onClick={props.goConfigs}>管理</button>
+                    </span>
                 </div>
                 <div className="line">
                     <span className="line-label">可选加速</span>

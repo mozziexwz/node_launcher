@@ -37,9 +37,14 @@ func TestSettingsDefaultsAndRoundTrip(t *testing.T) {
 		t.Fatalf("addons must exist and default to off: %v", s.Addons)
 	}
 
+	if s.Transport != "" {
+		t.Fatalf("default transport %q, want empty (TCP)", s.Transport)
+	}
+
 	s.CurrentConfig = "直连.json"
 	s.ProbeTarget = ProbeTarget{Address: "51.222.56.192", Port: 8484}
 	s.Addons["discord"] = true
+	s.Transport = "udp"
 	if err := l.SaveSettings(s); err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +52,7 @@ func TestSettingsDefaultsAndRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.CurrentConfig != "直连.json" || got.ProbeTarget.Port != 8484 || !got.Addons["discord"] || got.Addons["steam"] {
+	if got.CurrentConfig != "直连.json" || got.ProbeTarget.Port != 8484 || !got.Addons["discord"] || got.Addons["steam"] || got.Transport != "udp" {
 		t.Fatalf("round trip %+v", got)
 	}
 }
@@ -59,6 +64,7 @@ func TestSettingsRejectInvalidValues(t *testing.T) {
 		"bad probe port":       func(s *Settings) { s.ProbeTarget.Port = 70000 },
 		"unknown addon":        func(s *Settings) { s.Addons["vpn"] = true },
 		"path in config name":  func(s *Settings) { s.CurrentConfig = `..\x.json` },
+		"unknown transport":    func(s *Settings) { s.Transport = "quic" },
 	} {
 		s := DefaultSettings()
 		mutate(&s)
@@ -101,8 +107,24 @@ func TestImportListDeleteConfigs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if entry.Name != "直连.json" || entry.Profile != "default" || entry.Entrance != "192.0.2.10:8964" || entry.Err != nil {
+	if entry.Name != "直连.json" || entry.Profile != "default" || entry.Entrance != "192.0.2.10:8964" || entry.UDP || entry.Err != nil {
 		t.Fatalf("entry %+v", entry)
+	}
+	// A node that serves UDP adds a same-port UDP binding; the entrance is
+	// still its TCP port.
+	dual := filepath.Join(src, "双栈.json")
+	writeFile(t, dual, []byte(strings.Replace(string(exampleConfig(t)), `"protocol": "TCP"
+            }`, `"protocol": "TCP"
+            },
+            {
+              "port": 8964,
+              "protocol": "UDP"
+            }`, 1)))
+	if entry, err := l.ImportConfig(dual, false); err != nil || !entry.UDP || entry.Entrance != "192.0.2.10:8964" {
+		t.Fatalf("dual-transport entry %+v %v", entry, err)
+	}
+	if err := l.DeleteConfig("双栈.json"); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := l.ImportConfig(invalid, false); err == nil {
 		t.Fatal("an invalid configuration must not be imported")

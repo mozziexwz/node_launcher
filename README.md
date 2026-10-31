@@ -11,7 +11,7 @@
 
 | 组件 | 版本 | 用途 |
 |---|---|---|
-| [mieru](https://github.com/enfein/mieru) | v3.38.1 | 进程内嵌入，提供本地 SOCKS5（只监听 127.0.0.1，端口随机，每次启动生成会话凭据） |
+| [mieru](https://github.com/enfein/mieru) | v3.39.0 | 进程内嵌入，提供本地 SOCKS5（只监听 127.0.0.1，端口随机，每次启动生成会话凭据） |
 | [ProxyBridge](https://github.com/InterceptSuite/ProxyBridge) 核心 | v4.1.0 | 编译为 `ProxyBridgeCore.dll`，基于 WinDivert 把指定进程的流量转进本地 SOCKS5 |
 | [WinDivert](https://github.com/basil00/WinDivert) | 2.2.2-A | 官方签名的驱动与库，原样分发 |
 | [Wails](https://wails.io) v2 + React/TypeScript | v2.16.0 | 界面 |
