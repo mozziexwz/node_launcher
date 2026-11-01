@@ -416,3 +416,20 @@ func TestResultCompactRounding(t *testing.T) {
 		t.Errorf("failed samples must not be averaged as zero: %+v", mixed)
 	}
 }
+
+// Hello is the UDP start's check: only the node's own reply counts, within
+// the timeout.
+func TestHelloNeedsTheNodesReply(t *testing.T) {
+	working := startFakeSOCKS(t, "u", "p", scriptedNode(0, func(int, wireRequest) string { return "" }))
+	if err := Hello(working.proxy(), time.Second); err != nil {
+		t.Fatalf("hello through a working tunnel: %v", err)
+	}
+	silent := startFakeSOCKS(t, "u", "p", func(int, net.Conn) { time.Sleep(time.Second) })
+	start := time.Now()
+	if err := Hello(silent.proxy(), 300*time.Millisecond); err == nil {
+		t.Fatal("a tunnel that never answers passed")
+	}
+	if elapsed := time.Since(start); elapsed > 900*time.Millisecond {
+		t.Fatalf("hello took %v, past its timeout", elapsed)
+	}
+}

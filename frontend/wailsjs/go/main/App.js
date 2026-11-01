@@ -78,6 +78,10 @@ export function SetProbeTarget(arg1, arg2) {
   return window['go']['main']['App']['SetProbeTarget'](arg1, arg2);
 }
 
+export function SetTransport(arg1) {
+  return window['go']['main']['App']['SetTransport'](arg1);
+}
+
 export function ShowWindow() {
   return window['go']['main']['App']['ShowWindow']();
 }

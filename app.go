@@ -16,6 +16,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/mozziexwz/node_launcher/internal/app"
+	"github.com/mozziexwz/node_launcher/internal/engine"
 	"github.com/mozziexwz/node_launcher/internal/logx"
 	"github.com/mozziexwz/node_launcher/internal/redirector"
 	"github.com/mozziexwz/node_launcher/internal/store"
@@ -203,11 +204,15 @@ func (a *App) Overview() OverviewDTO {
 		GameGroups:    toGroupDTOs(),
 		ProbeAddress:  settings.ProbeTarget.Address,
 		ProbePort:     settings.ProbeTarget.Port,
+		Transport:     engine.TransportTCP,
 		Elevated:      elevated,
 		Conflicts:     toConflictDTOs(conflicts),
 		SettingsError: a.settingsErr,
 		DataDir:       a.layout.Root,
 		Version:       versionString(),
+	}
+	if settings.Transport == engine.TransportUDP {
+		dto.Transport = engine.TransportUDP
 	}
 	if a.lockErr != nil {
 		dto.LockError = "另一个 MSBOOST 程序（例如 msboostctl）正在使用加速核心，请先关闭它，然后重新打开本程序"
@@ -284,6 +289,9 @@ func (a *App) OpenFolder(kind string) error {
 
 // SetAddon switches Discord or Steam acceleration.
 func (a *App) SetAddon(id string, on bool) error { return a.ctl.SetAddon(id, on) }
+
+// SetTransport chooses TCP or UDP to the node for the next start.
+func (a *App) SetTransport(transport string) error { return a.ctl.SetTransport(transport) }
 
 // SetProbeTarget changes the full-path probe target.
 func (a *App) SetProbeTarget(address string, port int) error {

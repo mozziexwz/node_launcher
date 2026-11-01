@@ -22,6 +22,7 @@ type StatusDTO struct {
 	UploadRate   int64           `json:"uploadRate"` // bytes per second
 	DownloadRate int64           `json:"downloadRate"`
 	SystemProxy  []string        `json:"systemProxy"` // system proxy endpoints taken over
+	Transport    string          `json:"transport"`   // tcp | udp while accelerating, else ""
 	LastError    string          `json:"lastError"`
 	Addons       map[string]bool `json:"addons"`
 }
@@ -30,6 +31,7 @@ type ConfigDTO struct {
 	Name     string `json:"name"`
 	Profile  string `json:"profile"`
 	Entrance string `json:"entrance"`
+	UDP      bool   `json:"udp"` // the node also serves UDP
 	Error    string `json:"error"`
 	Current  bool   `json:"current"`
 }
@@ -60,6 +62,7 @@ type OverviewDTO struct {
 	GameGroups    []GroupDTO    `json:"gameGroups"`
 	ProbeAddress  string        `json:"probeAddress"`
 	ProbePort     int           `json:"probePort"`
+	Transport     string        `json:"transport"` // the user's choice: tcp | udp
 	Elevated      bool          `json:"elevated"`
 	Conflicts     []ConflictDTO `json:"conflicts"`
 	LockError     string        `json:"lockError"`
@@ -83,6 +86,7 @@ type CheckDTO struct {
 	GameTarget     string    `json:"gameTarget"`
 	Game           ResultDTO `json:"game"`
 	DNS            DNSDTO    `json:"dns"`
+	Transport      string    `json:"transport"` // tcp | udp: what carried the game check
 }
 
 // DNSDTO is whether this computer resolves the game's host names.
@@ -131,8 +135,8 @@ func toStatusDTO(st app.Status) StatusDTO {
 	dto := StatusDTO{
 		State: string(st.State), Config: st.Config,
 		Upload: st.Upload, Download: st.Download, UploadRate: st.UploadRate, DownloadRate: st.DownloadRate,
-		SystemProxy: st.SystemProxy,
-		LastError:   st.LastError, Addons: st.Addons,
+		SystemProxy: st.SystemProxy, Transport: st.Transport,
+		LastError: st.LastError, Addons: st.Addons,
 	}
 	if !st.Since.IsZero() {
 		dto.SinceUnix = st.Since.UnixMilli()
@@ -143,7 +147,7 @@ func toStatusDTO(st app.Status) StatusDTO {
 func toConfigDTOs(list []store.ConfigEntry, current string) []ConfigDTO {
 	out := make([]ConfigDTO, 0, len(list))
 	for _, c := range list {
-		dto := ConfigDTO{Name: c.Name, Profile: c.Profile, Entrance: c.Entrance, Current: c.Name == current}
+		dto := ConfigDTO{Name: c.Name, Profile: c.Profile, Entrance: c.Entrance, UDP: c.UDP, Current: c.Name == current}
 		if c.Err != nil {
 			dto.Error = c.Err.Error()
 		}
@@ -194,7 +198,7 @@ func toCheckDTO(r app.CheckResult) CheckDTO {
 		ExitIP: r.ExitIP, ExitIPError: r.ExitIPError,
 		EntranceTarget: r.EntranceTarget, Entrance: toResultDTO(r.Entrance),
 		GameTarget: r.GameTarget, Game: toResultDTO(r.Game),
-		DNS: toDNSDTO(r.DNS),
+		DNS: toDNSDTO(r.DNS), Transport: r.Transport,
 	}
 }
 

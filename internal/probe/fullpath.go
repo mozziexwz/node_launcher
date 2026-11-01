@@ -144,6 +144,18 @@ func (s *fullPathSession) close() {
 	}
 }
 
+// Hello proves that the tunnel behind proxy reaches an MSBOOST node: a hello
+// to the node's loopback probe must come back within timeout. A SOCKS5 reply
+// alone proves nothing, since the core may answer before the tunnel is up.
+func Hello(proxy Proxy, timeout time.Duration) error {
+	s, err := openFullPathSession(proxy, FullPathProbePort, timeout)
+	if err != nil {
+		return err
+	}
+	s.close()
+	return nil
+}
+
 // openFullPathSession runs the shared warmup: connect to the local SOCKS5,
 // CONNECT the node-side 127.0.0.1:probePort and complete hello, all within
 // one timeout budget.

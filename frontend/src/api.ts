@@ -5,6 +5,9 @@ import {EventsOn} from '../wailsjs/runtime/runtime'
 
 export type State = 'idle' | 'starting' | 'running' | 'stopping'
 
+// How the core reaches the node. UDP needs a configuration with a UDP binding.
+export type Transport = 'tcp' | 'udp'
+
 export interface Status {
     state: State
     config: string
@@ -14,6 +17,7 @@ export interface Status {
     uploadRate: number // bytes per second
     downloadRate: number
     systemProxy: string[] | null // system proxy endpoints being taken over
+    transport: Transport | '' // in use while accelerating, else ''
     lastError: string
     addons: Record<string, boolean>
 }
@@ -22,6 +26,7 @@ export interface ConfigItem {
     name: string
     profile: string
     entrance: string
+    udp: boolean // the node also serves UDP
     error: string
     current: boolean
 }
@@ -52,6 +57,7 @@ export interface Overview {
     gameGroups: Group[]
     probeAddress: string
     probePort: number
+    transport: Transport // the user's choice
     elevated: boolean
     conflicts: Conflict[]
     lockError: string
@@ -75,6 +81,7 @@ export interface Check {
     gameTarget: string
     game: Result
     dns: DNSCheck
+    transport: Transport // what carried the game check
 }
 
 export interface DNSCheck {
@@ -133,6 +140,7 @@ export const api = {
     openFolder: (kind: 'configs' | 'logs' | 'data') => Go.OpenFolder(kind),
     setAddon: (id: string, on: boolean) => Go.SetAddon(id, on),
     setProbeTarget: (address: string, port: number) => Go.SetProbeTarget(address, port),
+    setTransport: (transport: Transport) => Go.SetTransport(transport),
     resetProbeTarget: () => Go.ResetProbeTarget(),
     runCheck: async () => plain<Check>(await Go.RunCheck()),
     recentLogs: async () => plain<LogLine[]>(await Go.RecentLogs()) ?? [],
