@@ -133,7 +133,7 @@ export function Home(props: {
     }
 
     const note = running ? [
-            st.transport === 'udp' ? '经 UDP 连接节点' : '',
+            st.transport ? `经 ${st.transport.toUpperCase()} 连接节点` : '',
             st.systemProxy && st.systemProxy.length > 0
                 ? `已接管系统代理 ${st.systemProxy.join('、')}：游戏发往它的请求改由 MSBOOST 发出` : '',
         ].filter(Boolean).join('；')
